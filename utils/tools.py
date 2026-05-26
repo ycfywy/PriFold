@@ -59,21 +59,14 @@ def load_data(args, tokenizer, aug=None, smooth=None):
     return train_dataset, val_dataset, test_dataset
 
 def get_posbias(seqs, max_len, scale):
-    posbias = np.ones((len(seqs), max_len-2, max_len-2), dtype=float)
-    pair_scores = {
-        ('A', 'T'): 3,
-        ('T', 'A'): 3,
-        ('G', 'C'): 6,
-        ('C', 'G'): 6,
-        ('G', 'T'): 1,
-        ('T', 'G'): 1
-    }
+    pair_scores = {'AT': 3, 'TA': 3, 'GC': 6, 'CG': 6, 'GT': 1, 'TG': 1}
+    posbias = np.ones((len(seqs), max_len-2, max_len-2), dtype=np.float32)
     for i, seq in enumerate(seqs):
-        for j in range(len(seq)):
-            for k in range(len(seq)):
-                nucleotide1 = seq[j]
-                nucleotide2 = seq[k]
-                if (nucleotide1, nucleotide2) in pair_scores:
-                    posbias[i, j, k] = pair_scores[(nucleotide1, nucleotide2)] * scale + 1.0
+        L = len(seq)
+        seq_arr = np.array(list(seq))
+        for pair, score in pair_scores.items():
+            mask_row = (seq_arr == pair[0])
+            mask_col = (seq_arr == pair[1])
+            posbias[i, :L, :L] += np.outer(mask_row, mask_col) * (score * scale)
     posbias = np.pad(posbias, ((0, 0), (1, 1), (1, 1)), mode='constant', constant_values=0)
     return torch.Tensor(posbias)

@@ -1,8 +1,24 @@
-log/
+# Data / pretrained weights
 model/
 data/
+data.tar.gz
 ckpts/
+*.pt
+*.pth
+
+# Runtime logs / experiment outputs
+log/
+logs/
+outputs/
 wandb/
+symfold/logs/
+symfold/outputs/
+
+# Local caches
+.hf_cache/
+.hf_prifold/
 __pycache__/
 *.pyc
-data.tar.gz
+
+# IDE / local settings
+.vscode/

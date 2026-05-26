@@ -11,6 +11,8 @@ def get_extractor(args):
         model = 'mars-85m'
     elif args.model_scale == "160m":
         model = 'mars-160m'
+    elif args.model_scale == "lx":
+        model = 'mars_run-encoder-mars-lx-train-val-d0.15-2023_10_05_22_03_21'
     else:
         raise NotImplementedError
     

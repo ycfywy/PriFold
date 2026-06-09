@@ -12,9 +12,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from utils.lm import get_extractor
-from symfold.data import build_loader
-from symfold.metrics import contact_metrics
-from symfold.train import build_model, load_config, move_to_device
+from symfold.v1.data import build_loader
+from symfold.v1.metrics import contact_metrics
+from symfold.v1.train import build_model, load_config, move_to_device
 
 
 def main():

@@ -1,0 +1,92 @@
+{
+  "project_name": "prifold_symflow",
+  "task_name": "v3_bprna",
+  "seed": 3407,
+  "device": "cuda:0",
+  "model": {
+    "mars_scale": "lx",
+    "freeze_mars": true,
+    "mars_dim": 1056,
+    "mars_n_attn_layers": 6,
+    "mars_n_heads": 12,
+    "hidden_dim": 256,
+    "num_heads": 4,
+    "dim_head": 64,
+    "num_layers": 9,
+    "patch_size": 4,
+    "mars_emb_proj_dim": 32,
+    "mars_attn_proj_dim": 16,
+    "xt_emb_dim": 8,
+    "mlp_ratio": 4,
+    "dropout": 0.1,
+    "dilation_pattern": [
+      1,
+      1,
+      1,
+      2,
+      2,
+      2,
+      4,
+      4,
+      4
+    ],
+    "tri_start_layer": 6,
+    "tri_dim": 64,
+    "refine_mid_ch": 16,
+    "rho_0": 0.005,
+    "pos_weight_base": 199.0,
+    "pos_weight_min": 20.0,
+    "focal_gamma": 1.5,
+    "stack_weight": 0.05,
+    "nc_weight": 0.02,
+    "density_weight": 0.2,
+    "pos_bias_scale": 0.01,
+    "mars_hidden_layer_indices": [
+      3,
+      6,
+      9,
+      12
+    ],
+    "mars_hidden_fusion_dim": 64,
+    "use_seq_oh": true,
+    "density_hint_dropout": 1.0,
+    "version": "v3"
+  },
+  "training": {
+    "dataset_mode": "bprna",
+    "epochs": 120,
+    "batch_size": 8,
+    "amp_dtype": "bf16",
+    "lr": 8e-05,
+    "weight_decay": 0.01,
+    "warmup_epochs": 5,
+    "eval_every": 2,
+    "test_eval_every": 10,
+    "save_every": 10,
+    "patience": 30,
+    "grad_clip": 1.0,
+    "num_workers": 4,
+    "pin_memory": true,
+    "max_len_filter": 490,
+    "log_every": 50,
+    "heartbeat_every": 50,
+    "auto_resume": true,
+    "augmentation": {
+      "enabled": true,
+      "select": 0.1,
+      "replace": 0.3
+    }
+  },
+  "sampling": {
+    "num_steps": 20,
+    "num_samples_per_input": 1,
+    "density_guided": true
+  },
+  "paths": {
+    "data_dir": "/root/aigame/dannyyan/PriFold/data",
+    "pretrained_lm_dir": "/root/aigame/dannyyan/PriFold/model",
+    "log_dir": "/root/aigame/dannyyan/PriFold/symfold/logs/v3_bprna",
+    "output_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v3_bprna",
+    "model_save_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v3_bprna/model"
+  }
+}

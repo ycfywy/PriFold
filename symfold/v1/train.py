@@ -18,9 +18,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from utils.lm import get_extractor
-from symfold.data import build_loader
-from symfold.metrics import contact_metrics
-from symfold.model import PriFoldSymFlowModel
+from symfold.v1.data import build_loader
+from symfold.v1.metrics import contact_metrics
+from symfold.v1.model import PriFoldSymFlowModel
 
 
 def load_config(path: str) -> dict:
@@ -47,6 +47,75 @@ def write_heartbeat(path: Path, payload: dict):
             json.dump(payload, f, default=str)
     except Exception:
         pass
+
+
+def plot_curves(history: list, output_dir: Path, logger=None):
+    """Render training/validation curves to PNG from the history list."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception as exc:  # pragma: no cover
+        if logger:
+            logger.warning(f"[Plot] matplotlib unavailable, skip plotting: {exc}")
+        return
+
+    if not history:
+        return
+
+    epochs = [h["epoch"] for h in history]
+    train_loss = [h.get("loss") for h in history]
+    bce = [h.get("bce") for h in history]
+    lr = [h.get("lr") for h in history]
+
+    eval_epochs, val_f1, val_p, val_r, val_mcc = [], [], [], [], []
+    for h in history:
+        if "val_f1" in h:
+            eval_epochs.append(h["epoch"])
+            val_f1.append(h["val_f1"])
+            val_p.append(h["val_precision"])
+            val_r.append(h["val_recall"])
+            val_mcc.append(h["val_mcc"])
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
+
+    ax = axes[0, 0]
+    ax.plot(epochs, train_loss, "-o", color="#d62728", label="train loss", ms=3)
+    if any(b is not None for b in bce):
+        ax.plot(epochs, bce, "--", color="#ff9896", label="bce", lw=1)
+    ax.set_title("Training Loss")
+    ax.set_xlabel("epoch"); ax.set_ylabel("loss"); ax.grid(alpha=0.3); ax.legend()
+
+    ax = axes[0, 1]
+    if eval_epochs:
+        ax.plot(eval_epochs, val_f1, "-o", color="#1f77b4", label="val F1", ms=4)
+        ax.plot(eval_epochs, val_mcc, "-s", color="#2ca02c", label="val MCC", ms=3)
+        best_i = int(max(range(len(val_f1)), key=lambda i: val_f1[i]))
+        ax.scatter([eval_epochs[best_i]], [val_f1[best_i]], color="gold",
+                   edgecolor="black", zorder=5, s=120,
+                   label=f"best F1={val_f1[best_i]:.4f}@e{eval_epochs[best_i]}")
+    ax.set_title("Validation F1 / MCC")
+    ax.set_xlabel("epoch"); ax.set_ylabel("score"); ax.grid(alpha=0.3); ax.legend()
+
+    ax = axes[1, 0]
+    if eval_epochs:
+        ax.plot(eval_epochs, val_p, "-o", color="#9467bd", label="val precision", ms=3)
+        ax.plot(eval_epochs, val_r, "-o", color="#8c564b", label="val recall", ms=3)
+        ax.plot(eval_epochs, val_f1, "-o", color="#1f77b4", label="val F1", ms=3)
+    ax.set_title("Validation P / R / F1")
+    ax.set_xlabel("epoch"); ax.set_ylabel("score"); ax.grid(alpha=0.3); ax.legend()
+
+    ax = axes[1, 1]
+    ax.plot(epochs, lr, "-o", color="#7f7f7f", ms=3)
+    ax.set_title("Learning Rate")
+    ax.set_xlabel("epoch"); ax.set_ylabel("lr"); ax.grid(alpha=0.3)
+
+    fig.tight_layout()
+    out_path = output_dir / "training_curves.png"
+    fig.savefig(out_path, dpi=130)
+    plt.close(fig)
+    if logger:
+        logger.info(f"[Plot] curves saved to {out_path}")
 
 
 def move_to_device(batch: dict, device: torch.device) -> dict:
@@ -254,6 +323,7 @@ def main():
         history.append(entry)
         with open(output_dir / "history.json", "w") as f:
             json.dump(history, f, indent=2)
+        plot_curves(history, output_dir, logger)
         torch.save({
             "epoch": epoch,
             "model": model.state_dict(),
@@ -269,6 +339,7 @@ def main():
             break
 
     logger.info("Training finished")
+    plot_curves(history, output_dir, logger)
 
 
 if __name__ == "__main__":

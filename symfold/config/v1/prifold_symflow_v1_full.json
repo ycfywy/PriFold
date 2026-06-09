@@ -1,0 +1,59 @@
+{
+  "project_name": "prifold_symflow",
+  "task_name": "prifold_symflow_v1_full",
+  "seed": 3407,
+  "device": "cuda:0",
+  "model": {
+    "mars_scale": "lx",
+    "freeze_mars": true,
+    "d_pair": 64,
+    "hidden_dim": 256,
+    "num_heads": 4,
+    "num_layers": 6,
+    "patch_size": 4,
+    "dropout": 0.1,
+    "rho_0": 0.005,
+    "use_pos_bias": true,
+    "pos_bias_scale": 0.01,
+    "output_refine": true,
+    "pos_weight_base": 199.0,
+    "pos_weight_min": 20.0,
+    "focal_gamma": 1.5,
+    "stack_weight": 0.0,
+    "nc_weight": 0.0,
+    "density_weight": 0.2
+  },
+  "training": {
+    "epochs": 60,
+    "batch_size": 8,
+    "lr": 3e-4,
+    "warmup_epochs": 3,
+    "eval_every": 2,
+    "save_every": 5,
+    "patience": 10,
+    "grad_clip": 1.0,
+    "num_workers": 4,
+    "pin_memory": true,
+    "max_len_filter": 490,
+    "max_train_samples": null,
+    "max_val_samples": null,
+    "log_every": 50,
+    "heartbeat_every": 50,
+    "augmentation": {
+      "enabled": true,
+      "select": 0.1,
+      "replace": 0.3
+    }
+  },
+  "sampling": {
+    "num_steps": 20,
+    "num_samples_per_input": 1
+  },
+  "paths": {
+    "data_dir": "/root/aigame/dannyyan/PriFold/data",
+    "pretrained_lm_dir": "/root/aigame/dannyyan/PriFold/model",
+    "log_dir": "/root/aigame/dannyyan/PriFold/symfold/logs/prifold_symflow_v1_full",
+    "output_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/prifold_symflow_v1_full",
+    "model_save_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/prifold_symflow_v1_full/model"
+  }
+}

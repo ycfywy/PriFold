@@ -1,0 +1,152 @@
+{
+  "_comment": "No focal (standard BCE)",
+  "project_name": "prifold_symflow",
+  "task_name": "abl_focal_0",
+  "seed": 3407,
+  "device": "cuda:0",
+  "model": {
+    "version": "v6",
+    "mars_scale": "lx",
+    "freeze_mars": true,
+    "mars_dim": 1056,
+    "mars_n_attn_layers": 6,
+    "mars_n_heads": 12,
+    "hidden_dim": 320,
+    "num_heads": 4,
+    "dim_head": 80,
+    "num_layers": 12,
+    "patch_size": 4,
+    "mars_emb_proj_dim": 32,
+    "mars_attn_proj_dim": 16,
+    "xt_emb_dim": 8,
+    "mlp_ratio": 4,
+    "dropout": 0.1,
+    "dilation_pattern": [
+      1,
+      1,
+      1,
+      2,
+      2,
+      2,
+      4,
+      4,
+      4,
+      8,
+      8,
+      8
+    ],
+    "tri_start_layer": 4,
+    "tri_dim": 64,
+    "refine_mid_ch": 16,
+    "rho_0": 0.005,
+    "pos_bias_scale": 0.01,
+    "mars_hidden_layer_indices": [
+      3,
+      6,
+      9,
+      12
+    ],
+    "mars_hidden_fusion_dim": 64,
+    "use_seq_oh": true,
+    "density_hint_dropout": 1.0,
+    "cond_bias_zero_init": true,
+    "control_every": 3,
+    "direct_score_weight": 0.5,
+    "use_direct_head": true,
+    "use_density_head": true
+  },
+  "loss": {
+    "bce": {
+      "enabled": true,
+      "pos_weight_base": 99.0,
+      "pos_weight_min": 10.0,
+      "focal_gamma": 0.0,
+      "time_weight": true
+    },
+    "dice": {
+      "enabled": true,
+      "weight": 0.5,
+      "smooth": 1.0
+    },
+    "tversky": {
+      "enabled": false,
+      "weight": 0.5,
+      "alpha": 0.3,
+      "beta": 0.7,
+      "smooth": 1.0
+    },
+    "pair_count": {
+      "enabled": true,
+      "weight": 0.3
+    },
+    "ratio_penalty": {
+      "enabled": true,
+      "weight": 0.2,
+      "threshold": 1.2
+    },
+    "density": {
+      "enabled": true,
+      "weight": 0.2
+    },
+    "direct": {
+      "enabled": true,
+      "weight": 0.4
+    },
+    "stacking": {
+      "enabled": true,
+      "weight": 0.05
+    },
+    "non_crossing": {
+      "enabled": true,
+      "weight": 0.03
+    },
+    "label_smoothing": {
+      "enabled": false,
+      "epsilon": 0.01
+    }
+  },
+  "training": {
+    "dataset_mode": "bprna",
+    "epochs": 300,
+    "batch_size": 6,
+    "amp_dtype": "bf16",
+    "lr": 0.00015,
+    "weight_decay": 0.01,
+    "warmup_epochs": 8,
+    "eval_every": 2,
+    "test_eval_every": 10,
+    "save_every": 9999,
+    "patience": 40,
+    "grad_clip": 1.0,
+    "num_workers": 4,
+    "pin_memory": true,
+    "max_len_filter": 490,
+    "log_every": 50,
+    "heartbeat_every": 50,
+    "auto_resume": true,
+    "augmentation": {
+      "enabled": true,
+      "select": 0.1,
+      "replace": 0.3
+    }
+  },
+  "sampling": {
+    "num_steps": 20,
+    "num_samples_per_input": 1,
+    "density_guided": false,
+    "projection_mode": "score",
+    "use_density_budget": true,
+    "budget_scale": 1.1,
+    "candidate_weight": 0.35,
+    "direct_score_weight": 0.5,
+    "score_threshold": 0.5,
+    "default_budget_fraction": 0.3
+  },
+  "paths": {
+    "data_dir": "/root/aigame/dannyyan/PriFold/data",
+    "pretrained_lm_dir": "/root/aigame/dannyyan/PriFold/model",
+    "log_dir": "/root/aigame/dannyyan/PriFold/symfold/logs/abl_focal_0",
+    "output_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/abl_focal_0",
+    "model_save_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/abl_focal_0/model"
+  }
+}

@@ -9,10 +9,20 @@ ckpts/
 # Runtime logs / experiment outputs
 log/
 logs/
-outputs/
 wandb/
 symfold/logs/
-symfold/outputs/
+
+# Ignore outputs but keep images
+outputs/**
+!outputs/**/
+!outputs/**/*.png
+!outputs/**/*.jpg
+!outputs/**/*.svg
+symfold/outputs/**
+!symfold/outputs/**/
+!symfold/outputs/**/*.png
+!symfold/outputs/**/*.jpg
+!symfold/outputs/**/*.svg
 
 # Local caches
 .hf_cache/

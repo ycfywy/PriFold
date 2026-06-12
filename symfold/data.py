@@ -171,28 +171,66 @@ class PriFoldSymFlowDataset(Dataset):
 
 
 class LengthBucketBatchSampler(torch.utils.data.Sampler[list[int]]):
+    """Dynamic batch sampler: short sequences get larger batches, long sequences get smaller.
+
+    Uses a token budget: batch_size = max_tokens / seq_length² (since memory is O(L²)).
+    This ensures consistent GPU memory usage regardless of sequence length.
+    """
     def __init__(self, lengths: Iterable[int], batch_size: int,
-                 shuffle: bool = True, seed: int = 0):
+                 shuffle: bool = True, seed: int = 0,
+                 max_sq_tokens: int | None = None):
         self.lengths = list(lengths)
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.seed = seed
         self.epoch = 0
+        # max_sq_tokens: budget for B * L^2. If None, use fixed batch_size.
+        # Default: batch_size * median_length^2
+        if max_sq_tokens is None:
+            median_len = sorted(self.lengths)[len(self.lengths) // 2]
+            self.max_sq_tokens = batch_size * median_len * median_len
+        else:
+            self.max_sq_tokens = max_sq_tokens
+
+    def _get_dynamic_batch_size(self, length: int) -> int:
+        """Compute batch size for a given sequence length."""
+        bs = max(1, self.max_sq_tokens // (length * length))
+        return min(bs, self.batch_size * 4)  # cap at 4x base batch
 
     def __iter__(self):
         rng = np.random.default_rng(self.seed + self.epoch)
         order = list(range(len(self.lengths)))
         if self.shuffle:
             rng.shuffle(order)
+        # Sort by length for bucketing
         order.sort(key=lambda i: self.lengths[i])
-        batches = [order[i:i + self.batch_size]
-                   for i in range(0, len(order), self.batch_size)]
+        # Build batches with dynamic size
+        batches = []
+        i = 0
+        while i < len(order):
+            # Use the max length in current position to determine batch size
+            cur_len = self.lengths[order[i]]
+            bs = self._get_dynamic_batch_size(cur_len)
+            batch = order[i:i + bs]
+            batches.append(batch)
+            i += len(batch)
         if self.shuffle:
             rng.shuffle(batches)
         yield from batches
 
     def __len__(self):
-        return math.ceil(len(self.lengths) / self.batch_size)
+        # Compute actual number of batches (cache after first call)
+        if not hasattr(self, '_cached_len'):
+            n_batches = 0
+            sorted_lengths = sorted(self.lengths)
+            i = 0
+            while i < len(sorted_lengths):
+                cur_len = sorted_lengths[i]
+                bs = self._get_dynamic_batch_size(cur_len)
+                i += bs
+                n_batches += 1
+            self._cached_len = n_batches
+        return self._cached_len
 
     def set_epoch(self, epoch: int):
         self.epoch = epoch

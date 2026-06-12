@@ -37,6 +37,8 @@ if isinstance(dev, str) and dev.startswith('cuda:'):
 version = str(cfg.get('model', {}).get('version', '')).lower()
 if 'dataset_mode' not in cfg.get('training', {}):
     entry = 'symfold/v1/train.py'
+elif version == 'v7' or task.startswith('v7_'):
+    entry = 'symfold/train_v7.py'
 elif version == 'v6' or task.startswith('v6_'):
     entry = 'symfold/train_v6.py'
 elif version == 'v5' or task.startswith('v5_'):

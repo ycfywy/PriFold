@@ -23,11 +23,18 @@ def contact_metrics(pred: torch.Tensor, target: torch.Tensor, lengths: torch.Ten
         fp = int((p & ~y).sum())
         fn = int((~p & y).sum())
         tn = int((~p & ~y).sum())
-        precision = tp / max(tp + fp, 1)
-        recall = tp / max(tp + fn, 1)
-        f1 = 2 * precision * recall / max(precision + recall, 1e-12)
-        denom = math.sqrt(max((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn), 1))
-        mcc = ((tp * tn) - (fp * fn)) / denom
+        # Handle edge case: gt_pairs=0 and pred_pairs=0 → perfect (F1=1)
+        if (tp + fn) == 0 and (tp + fp) == 0:
+            precision, recall, f1, mcc = 1.0, 1.0, 1.0, 1.0
+        elif (tp + fn) == 0 and (tp + fp) > 0:
+            # GT has no pairs but model predicted some → all FP
+            precision, recall, f1, mcc = 0.0, 1.0, 0.0, 0.0
+        else:
+            precision = tp / max(tp + fp, 1)
+            recall = tp / max(tp + fn, 1)
+            f1 = 2 * precision * recall / max(precision + recall, 1e-12)
+            denom = math.sqrt(max((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn), 1))
+            mcc = ((tp * tn) - (fp * fn)) / denom
         rows.append({
             "precision": precision,
             "recall": recall,

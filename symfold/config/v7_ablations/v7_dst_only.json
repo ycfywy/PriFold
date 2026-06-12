@@ -1,0 +1,146 @@
+{
+  "project_name": "prifold_symflow",
+  "task_name": "v7_dst_only",
+  "device": "cuda:0",
+  "paths": {
+    "data_dir": "./data",
+    "pretrained_lm_dir": "./model/mars_run-encoder-mars-lx-train-val-d0.15-2023_10_05_22_03_21",
+    "output_dir": "./symfold/outputs"
+  },
+  "model": {
+    "version": "v7",
+    "mars_scale": "lx",
+    "freeze_mars": true,
+    "mars_dim": 1056,
+    "mars_n_attn_layers": 6,
+    "mars_n_heads": 12,
+    "mars_hidden_layer_indices": [
+      3,
+      6,
+      9,
+      12
+    ],
+    "mars_hidden_fusion_dim": 64,
+    "use_seq_oh": true,
+    "hidden_dim": 320,
+    "num_heads": 4,
+    "dim_head": 80,
+    "num_layers": 12,
+    "patch_size": 4,
+    "mars_emb_proj_dim": 32,
+    "mars_attn_proj_dim": 16,
+    "xt_emb_dim": 8,
+    "mlp_ratio": 4,
+    "dropout": 0.1,
+    "dilation_pattern": [
+      1,
+      1,
+      1,
+      2,
+      2,
+      2,
+      4,
+      4,
+      4,
+      8,
+      8,
+      8
+    ],
+    "tri_start_layer": 4,
+    "tri_dim": 64,
+    "refine_mid_ch": 16,
+    "cond_bias_zero_init": true,
+    "control_every": 3,
+    "use_direct_head": true,
+    "use_density_head": true,
+    "rho_0": 0.005,
+    "density_hint_dropout": 1.0
+  },
+  "v7": {
+    "use_compatibility_prior": false,
+    "compat_hidden_dim": 64,
+    "compat_weight_strength": 0.5,
+    "compat_rate_modulation": 0.5,
+    "use_consistency_reg": false,
+    "consistency_weight": 0.3,
+    "consistency_temp": 2.0,
+    "use_density_stratified": true,
+    "dst_weight": 0.3,
+    "dst_tversky_alpha": 0.7,
+    "dst_tversky_beta": 0.3,
+    "dst_low_threshold": 0.18
+  },
+  "loss": {
+    "bce": {
+      "enabled": true,
+      "pos_weight_base": 99.0,
+      "pos_weight_min": 10.0,
+      "focal_gamma": 1.0,
+      "time_weight": true
+    },
+    "dice": {
+      "enabled": true,
+      "weight": 0.5,
+      "smooth": 1.0
+    },
+    "tversky": {
+      "enabled": false
+    },
+    "pair_count": {
+      "enabled": true,
+      "weight": 0.3
+    },
+    "ratio_penalty": {
+      "enabled": true,
+      "weight": 0.2,
+      "threshold": 1.2
+    },
+    "density": {
+      "enabled": true,
+      "weight": 0.2
+    },
+    "direct": {
+      "enabled": true,
+      "weight": 0.4
+    },
+    "stacking": {
+      "enabled": true,
+      "weight": 0.05
+    },
+    "non_crossing": {
+      "enabled": true,
+      "weight": 0.03
+    },
+    "label_smoothing": {
+      "enabled": false
+    }
+  },
+  "training": {
+    "dataset_mode": "bprna",
+    "batch_size": 5,
+    "lr": 0.00012,
+    "weight_decay": 0.01,
+    "epochs": 300,
+    "warmup_epochs": 10,
+    "patience": 40,
+    "grad_clip": 1.0,
+    "amp_dtype": "bf16",
+    "max_len_filter": 490,
+    "augmentation": true,
+    "aug_select": 0.1,
+    "aug_replace": 0.3
+  },
+  "sampling": {
+    "num_steps": 20,
+    "num_samples_per_input": 1,
+    "density_guided": false,
+    "projection_mode": "score",
+    "use_density_budget": true,
+    "budget_scale": 1.1,
+    "candidate_weight": 0.35,
+    "direct_score_weight": 0.5,
+    "score_threshold": 0.5,
+    "default_budget_fraction": 0.3,
+    "use_compat_filter": false
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "project_name": "prifold_symflow",
+  "task_name": "v8_full",
+  "device": "cuda:0",
+
+  "paths": {
+    "data_dir": "/root/aigame/dannyyan/PriFold/data",
+    "pretrained_lm_dir": "/root/aigame/dannyyan/PriFold/model",
+    "log_dir": "/root/aigame/dannyyan/PriFold/symfold/logs/v8_full",
+    "output_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v8_full",
+    "model_save_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v8_full/model"
+  },
+
+  "model": {
+    "version": "v8",
+    "mars_scale": "lx",
+    "freeze_mars": true,
+    "mars_dim": 1056,
+    "mars_n_attn_layers": 6,
+    "mars_n_heads": 12,
+    "mars_hidden_layer_indices": [3, 6, 9, 12],
+    "dropout": 0.2
+  },
+
+  "v8": {
+    "hidden_dim": 160,
+    "num_layers": 8,
+    "num_heads": 4,
+    "dim_head": 40,
+    "ff_mult": 4,
+    "dropout": 0.2,
+    "drop_path": 0.1
+  },
+
+  "loss": {
+    "focal_gamma": 1.0,
+    "pos_weight_base": 99.0,
+    "dice_weight": 0.5,
+    "dst_weight": 0.4,
+    "dst_low_threshold": 0.10,
+    "dst_tversky_alpha": 0.7,
+    "dst_tversky_beta": 0.3,
+    "pair_count_weight": 0.3,
+    "ratio_penalty_weight": 0.2,
+    "ratio_penalty_threshold": 1.15,
+    "density_loss_weight": 0.3,
+    "ohem_enabled": true,
+    "ohem_neg_ratio": 3,
+    "fp_penalty_enabled": true,
+    "fp_penalty_weight": 3.0,
+    "bp_compat_enabled": false,
+    "bp_compat_weight": 0.0,
+    "bp_compat_in_inference": false,
+    "shift_loss_enabled": true,
+    "shift_loss_weight": 0.3,
+    "shift_radius": 1
+  },
+
+  "training": {
+    "dataset_mode": "bprna",
+    "batch_size": 12,
+    "lr": 3e-4,
+    "weight_decay": 0.01,
+    "epochs": 200,
+    "warmup_epochs": 5,
+    "patience": 30,
+    "save_every": 9999,
+    "grad_clip": 1.0,
+    "amp_dtype": "bf16",
+    "max_len_filter": 490,
+    "augmentation": {"enabled": true, "select": 0.15, "replace": 0.35},
+    "family_balanced": {"enabled": false, "alpha": 0.5}
+  },
+
+  "sampling": {
+    "use_density_budget": true,
+    "default_budget_fraction": 0.30,
+    "score_threshold": 0.45,
+    "length_decay": 0.3
+  }
+}

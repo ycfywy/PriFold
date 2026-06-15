@@ -67,13 +67,13 @@ pip install -r requirements.txt
 ### 训练 v7
 
 ```bash
-bash symfold/run_train.sh symfold/config/v7_full.json
+bash symfold/train/run_train.sh symfold/config/v7/v7_full.json
 ```
 
 ### 运行消融实验
 
 ```bash
-bash symfold/run_train.sh symfold/config/v7_ablations/v7_no_dst.json
+bash symfold/train/run_train.sh symfold/config/v7/ablations/v7_no_dst.json
 ```
 
 ### 运行官方 PriFold baseline

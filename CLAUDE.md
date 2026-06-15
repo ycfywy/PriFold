@@ -1,6 +1,6 @@
 # CLAUDE.md — PriFold 当前工作指南
 
-> 最近更新：2026-06-12 10:08。当前主线任务是 `symfold` 的 PriFold-SymFlow/DensityNet；**v7 full 训练已完成**（200 epochs，best val F1=0.6408，best test F1=0.6538 @ e199）。下一步：运行消融实验（OHEM/FP penalty/碱基配对约束/RFAM 过采样，config 开关控制）。
+> 最近更新：2026-06-15 12:42。当前主线任务是 `symfold` 的 PriFold-SymFlow/DensityNet；**v8 DensityNet-Pro 训练已启动**（基于 v7 分析结果，新增 OHEM/FP penalty/BP compat/Shift loss/DropPath）。v7 full 已完成（test F1=0.6538），全面分析已完成。
 
 ## 1. 项目定位
 
@@ -11,7 +11,7 @@ PriFold 是 RNA 二级结构预测项目：输入 RNA 序列，输出 `L×L` con
 1. **官方 PriFold 主线**：判别式 RNAformer/RiboFormer baseline，入口在顶层 `train.py` / `inference.py`。
 2. **PriFold-SymFlow/DensityNet 实验线**：`symfold/`，经历了生成式（v1-v6 Bernoulli Discrete Flow Matching）→ **纯判别式（v7 DensityNet）** 的转型。
 
-当前主要开发/训练对象：**v7 DensityNet**（epoch 110，SIGTERM 终止待恢复）。v6 已完成分析，v5/v4 已完成。
+当前主要开发/训练对象：**v7 DensityNet**（200 epochs 完成，深度分析完成，消融实验待运行）。v6 已完成分析，v5/v4 已完成。
 
 ---
 
@@ -21,9 +21,9 @@ PriFold 是 RNA 二级结构预测项目：输入 RNA 序列，输出 `L×L` con
 
 ```text
 A. v7_full — 已完成 ✅（2026-06-12 06:18）
-config: symfold/config/v7_full.json
+config: symfold/config/v7/v7_full.json
 device: cuda:0
-entry: symfold/train_v7.py
+entry: symfold/train/train_v7.py
 架构: MARS-LX (160M 冻结) + Axial Transformer (8层)
 参数量: 3.56M trainable / 164M total（MARS 冻结）
 LR: 3e-4 peak, cosine over 200 epochs, warmup=5
@@ -34,24 +34,24 @@ pred/gt ratio = 1.122
 新增特性（config 开关，当前关闭，消融用）: OHEM, FP penalty, BP compat, Family balanced
 
 B. v6_full — 已完成（case analysis 已做，结论：转判别式）
-config: symfold/config/v6_full.json
+config: symfold/config/v6/v6_full.json
 参数量: 26M trainable
 最终: epoch 217 (中断), best test F1=0.6083 @ epoch 189
 pred/gt ratio = 1.07
 结论: 生成式噪声大，低密度样本过预测严重，转 v7 判别式
 
 C. v5_bprna — 已完成（2026-06-05 启动，2026-06-06 结束）
-config: symfold/config/v5_bprna.json
+config: symfold/config/v5/v5_bprna.json
 参数量: 26.1M trainable
 best val F1 = 0.6138 @ epoch 215
 best test F1 = 0.6188 @ epoch 209
 
 D. v4_bprna — 已完成
-config: symfold/config/v4_bprna.json
+config: symfold/config/v4/v4_bprna.json
 best val F1=0.4946 @ epoch 245
 
 E. v4_rnastralign — 已结束
-config: symfold/config/v4_rnastralign.json
+config: symfold/config/v4/v4_rnastralign.json
 best val F1=0.9459 @ epoch 41
 ```
 
@@ -65,6 +65,21 @@ best val F1=0.9459 @ epoch 41
 | 139 | 0.6484 | 0.6210 | 0.6954 | 0.6516 | 1.132 |
 | 179 | 0.6533 | 0.6273 | 0.6990 | 0.6565 | 1.127 |
 | **199** | **0.6538** | **0.6293** | **0.6982** | **0.6570** | **1.122** |
+
+**v7 深度分析关键结论**（200 epoch 完成后全量分析，5611 样本）：
+
+| 指标 | Train | Val | Test |
+|------|-------|-----|------|
+| F1 | 0.900 | 0.641 | 0.653 |
+| F1=0 | 9 (0.3%) | 43 (3.3%) | 40 (3.1%) |
+| F1≥0.9 | 1936 (64%) | 269 (21%) | 270 (21%) |
+| pred/gt | 1.107 | 1.229 | 1.261 |
+
+- **核心瓶颈：Precision 不足**（vs baseline: P差17%, R差仅6%）→ FP 过多
+- **泛化 gap 显著**：Train F1=0.900 vs Test F1=0.653（-24.7%）
+- **家族表现两极化**：CRW/SPR F1>0.93，RFAM F1=0.751，SRP F1=0.629
+- **F1=0 的 86/92 来自 RFAM 长尾罕见子家族**
+- **零配对样本**：发现 7 个 GT 配对数为 0 的数据异常
 
 ### 最新结果对照
 
@@ -82,10 +97,11 @@ vs 主线 PriFold bprna-test: F1=0.7700
 **关键观察**：
 - v7 test F1=0.6538 > v5 的 0.6188 > v6 的 0.6083，**历史最佳** 🎉
 - v7 仅 3.56M 参数，训练效率远超 v5/v6 的 26M flow model
-- v7 距 baseline 差距：**~15%**（vs v5 的 ~20%，v6 的 ~21%）
+- v7 距 baseline 差距：**~15.2%**（vs v5 的 ~20%，v6 的 ~21%）
 - 200 epochs 完成，patience 21/30（没有 early stop，schedule 跑完）
 - 判别式单次前向传播 vs 生成式多步 flow：推理速度也大幅提升
-- pred/gt=1.12：过预测控制良好
+- pred/gt=1.12（train）→1.26（test）：泛化时过预测加剧
+- **核心瓶颈已明确**：Precision 不足（vs baseline P差17%, R差仅6%）→ 减少 FP 是最大改进方向
 
 ---
 
@@ -124,32 +140,51 @@ PriFold/
 ├── symfold/                         # 当前实验主目录
 │   ├── data.py                      # 数据加载、pos_bias、seq_oh、padding、bucket sampler
 │   ├── metrics.py                   # P/R/F1/MCC
-│   ├── run_train.sh                 # 后台训练 + GPU monitor（支持 v1-v7）
-│   ├── gpu_monitor.py               # GPU 监控 daemon
-│   ├── show_gpu_stats.py            # 查看 gpu_stats.jsonl
-│   ├── analyze_cases.py             # bad-case 分析
-│   ├── analyze_v6_cases.py          # v6 专用 case 分析
-│   ├── train_v7.py                  # ★ v7 训练入口（DensityNet，纯判别式）
-│   ├── train_v6.py                  # v6 训练入口（消融实验用）
-│   ├── train_v5.py                  # v5 训练入口
-│   ├── train_v4.py                  # v4 训练入口
-│   ├── eval_v6_improved.py          # v6 推理优化评估
-│   ├── eval_v4.py                   # v4 评估入口
-│   ├── visualize_predictions.py     # 预测可视化
-│   ├── visualize_case_analysis.py   # case 分析可视化
-│   ├── v7/                          # ★ v7 模型代码（DensityNet）
+│   ├── train/                       # ★ 训练相关
+│   │   ├── train_v7.py             # v7 训练入口（DensityNet，纯判别式）
+│   │   ├── train_v6.py             # v6 训练入口
+│   │   ├── train_v5.py             # v5 训练入口
+│   │   ├── train_v4.py             # v4 训练入口
+│   │   ├── train_v3.py             # v3 训练入口（v4-v7 base）
+│   │   ├── train_v2.py             # v2 训练入口
+│   │   ├── run_train.sh            # 后台训练 + GPU monitor（支持 v1-v7）
+│   │   ├── run_gpu_monitor.sh      # GPU 监控补挂脚本
+│   │   └── gpu_monitor.py          # GPU 监控 daemon
+│   ├── eval/                        # ★ 评估相关
+│   │   ├── eval_v6_improved.py     # v6 推理优化评估
+│   │   ├── eval_v4.py              # v4 评估入口
+│   │   ├── eval_v3.py              # v3 评估入口
+│   │   └── eval_v2.py              # v2 评估入口
+│   ├── analysis/                    # ★ 分析与可视化
+│   │   ├── deep_analysis_v7.py     # v7 深度分析（5611 样本全覆盖）
+│   │   ├── analyze_v7_cases.py     # v7 case 分析
+│   │   ├── analyze_v6_cases.py     # v6 case 分析
+│   │   ├── analyze_v5_cases.py     # v5 case 分析
+│   │   ├── analyze_cases.py        # 通用 bad-case 分析
+│   │   ├── visualize_predictions.py    # 预测可视化
+│   │   ├── visualize_case_analysis.py  # case 分析可视化
+│   │   └── show_gpu_stats.py       # GPU 统计可视化
+│   ├── v7/                          # v7 模型代码（DensityNet）
 │   ├── v6/                          # v6 模型代码（模块化 loss + DASO）
 │   ├── v5/                          # v5 模型代码
 │   ├── v4/                          # v4 模型代码
-│   ├── config/                      # 所有版本配置
-│   │   ├── v7_full.json            # v7 主配置
-│   │   ├── v7_ablations/           # v7 消融配置（6个）
-│   │   ├── ablations/              # v6 消融配置（13个）
-│   │   └── v6_full.json / v5_bprna.json / ...
-│   └── outputs/                     # 训练输出
-│       ├── v7_full/                 # v7 输出（model/, history.json 等）
-│       ├── v6_full/                 # v6 输出
-│       └── v5_bprna/               # v5 输出
+│   ├── v3/                          # v3 模型代码
+│   ├── v2/                          # v2 模型代码
+│   ├── v1/                          # v1 模型代码
+│   ├── config/                      # 配置（按版本分目录）
+│   │   ├── v7/                     # v7_full.json + ablations/
+│   │   ├── v6/                     # v6_full.json + ablations/
+│   │   ├── v5/                     # v5_bprna.json
+│   │   ├── v4/                     # v4_bprna.json, v4_rnastralign.json
+│   │   ├── v3/                     # v3_bprna.json, v3_rnastralign.json
+│   │   ├── v2/                     # v2_*.json (7个)
+│   │   ├── v1/                     # v0/v1 配置
+│   │   └── gen_ablation_configs.py # 消融配置生成工具
+│   ├── outputs/                     # 训练输出（不动）
+│   │   ├── v7_full/                # model/, history.json, case_analysis/, deep_analysis/
+│   │   ├── v6_full/                # model/, history.json
+│   │   └── v5_bprna/ ...          # 各版本输出
+│   └── logs/                        # 训练日志（不动）
 └── docs/                            # 项目文档
 ```
 
@@ -294,10 +329,10 @@ v7 是**架构转型**：从生成式 flow model（v4-v6）转为纯判别式 De
 
 ### v7 消融配置（待运行）
 
-位于 `symfold/config/v7_ablations/`：
+位于 `symfold/config/v7/ablations/`：
 
 ```text
-# 原有消融
+# 已创建（6个，loss 组件消融）
 v7_dst_only.json          # 仅 DST 损失
 v7_fcr_only.json          # 仅 FCR 组件
 v7_no_dst.json            # 移除 DST 损失
@@ -305,7 +340,7 @@ v7_no_fcr.json            # 移除 FCR 组件
 v7_no_scp.json            # 移除 SCP 组件
 v7_scp_only.json          # 仅 SCP 组件
 
-# 新增消融（针对 F1=0 问题）
+# 计划中（尚未创建 JSON，代码 config 开关已就位，需用 gen_ablation_configs.py 生成）
 v7_all_new.json           # 全部新特性启用（OHEM+FP+BP+Family）
 v7_ohem_only.json         # 仅 OHEM
 v7_fp_penalty_only.json   # 仅 FP penalty
@@ -313,20 +348,22 @@ v7_bp_compat_only.json    # 仅碱基配对约束
 v7_family_balanced_only.json # 仅 RFAM 过采样
 ```
 
+**注意**：新消融配置文件尚未实际创建到磁盘。运行消融前需先生成这些 JSON。
+
 ---
 
 ## 5b. v6 模型要点（历史——已分析完成）
 
 v6 架构与 v5 **完全相同**，核心改进是 **loss 系统模块化**，专为论文消融设计。
 
-### v6 case analysis 结论（详见 `docs/v6_case_analysis_report.md`）
+### v6 case analysis 结论（详见 `docs/symfold_v6_case_analysis_report.md`）
 
 - F1=0 的案例占 7.7%，F1<0.3 占 18.9%
 - RFAM 家族 RNA 识别效果差
 - 模型预测出与 Ground Truth 有偏移的配对
 - **结论：生成式模型噪声太大 → 转向 v7 判别式**
 
-### v6 推理优化尝试（详见 `docs/v6_inference_optimization.md`）
+### v6 推理优化尝试（详见 `docs/symfold_v6_inference_optimization.md`）
 
 三种无需重训的策略：
 1. Density-Conditional Budget Scaling
@@ -356,7 +393,7 @@ RNA → MARS-LX hidden/attention + pos_bias/seq_oh
 
 ## 6. v7 配置
 
-当前 v7 配置：`symfold/config/v7_full.json`
+当前 v7 配置：`symfold/config/v7/v7_full.json`
 
 关键对比：
 
@@ -385,7 +422,7 @@ MARS 使用最大模型：`mars_scale=lx`，约 160M 参数（冻结），hidden
 cd /root/aigame/dannyyan/PriFold
 
 # 恢复 v7 full（从 last checkpoint 续训）
-bash symfold/run_train.sh symfold/config/v7_full.json
+bash symfold/train/run_train.sh symfold/config/v7/v7_full.json
 ```
 
 ### 启动 v7 消融实验
@@ -394,13 +431,13 @@ bash symfold/run_train.sh symfold/config/v7_full.json
 cd /root/aigame/dannyyan/PriFold
 
 # v7 消融：移除 DST
-bash symfold/run_train.sh symfold/config/v7_ablations/v7_no_dst.json
+bash symfold/train/run_train.sh symfold/config/v7/ablations/v7_no_dst.json
 
 # v7 消融：仅 DST
-bash symfold/run_train.sh symfold/config/v7_ablations/v7_dst_only.json
+bash symfold/train/run_train.sh symfold/config/v7/ablations/v7_dst_only.json
 
 # v7 消融：移除 FCR
-bash symfold/run_train.sh symfold/config/v7_ablations/v7_no_fcr.json
+bash symfold/train/run_train.sh symfold/config/v7/ablations/v7_no_fcr.json
 ```
 
 ### 旧版 v6 消融实验
@@ -409,33 +446,36 @@ bash symfold/run_train.sh symfold/config/v7_ablations/v7_no_fcr.json
 cd /root/aigame/dannyyan/PriFold
 
 # 消融：关闭 Dice
-bash symfold/run_train.sh symfold/config/ablations/abl_no_dice.json
+bash symfold/train/run_train.sh symfold/config/v6/ablations/abl_no_dice.json
 ```
 
 ### 评估 v4
 
 ```bash
-python symfold/eval_v4.py \
+python symfold/eval/eval_v4.py \
   --ckpt symfold/outputs/v4_bprna/model/best.pt \
   --out_json symfold/outputs/v4_bprna/eval_best.json
 ```
 
-`run_train.sh` 会自动：
+`run_train.sh`（位于 `symfold/train/run_train.sh`）会自动：
 
 - 激活 `RNADiffFold_torch260`
 - 设置 `PYTHONPATH`
-- 后台启动训练（自动检测 v7 → `train_v7.py`）
+- 后台启动训练（自动检测 v7 → `train/train_v7.py`）
 - 后台启动 GPU monitor
 - 写日志、checkpoint、曲线、GPU JSONL
 
 ### bad-case 分析
 
 ```bash
+# v7 deep analysis
+python symfold/analysis/deep_analysis_v7.py
+
 # v6 case analysis
-python symfold/analyze_v6_cases.py
+python symfold/analysis/analyze_v6_cases.py
 
 # v4 case analysis
-python symfold/analyze_cases.py \
+python symfold/analysis/analyze_cases.py \
   --ckpt symfold/outputs/v4_bprna/model/best.pt \
   --test_sets bprna-test \
   --out_dir symfold/outputs/v4_bprna/case_analysis
@@ -476,35 +516,56 @@ pred/gt ratio 更接近 1
 
 ---
 
-## 9. 重要历史文档
+## 9. 文档命名规范
+
+`docs/` 目录下的文档统一按以下前缀命名：
+
+| 前缀 | 用途 | 示例 |
+|------|------|------|
+| `symfold_v{N}_` | symfold 特定版本相关文档 | `symfold_v7_deep_analysis_report.md` |
+| `data_` | 数据集分析、数据分布相关 | `data_bprna_analysis.md` |
+| `project_` | 项目级别文档（概述、规范、流程） | `project_convention.md` |
+| `report_` | 日报/周报/阶段性报告 | `report_20260611.md` |
+
+**命名格式**：`{前缀}{描述}.md`，描述用下划线分隔，全小写。
+
+新写文档时**必须遵循此规范**。
+
+---
+
+## 10. 重要历史文档
 
 优先看：
 
 ```text
-docs/v7_case_analysis_report.md                     # v7 case 分析（F1=0、失败模式、RFAM 分析）
-docs/v7_f1_zero_loss_analysis.md                    # F1=0 的 loss 机制深度分析 → OHEM/FP penalty 动机
-docs/v6_case_analysis_report.md                     # v6 case 分析 → v7 转型动机
-docs/v6_inference_optimization.md                   # v6 推理优化 → DST 设计灵感
+docs/v7/v7_comprehensive_analysis_report.md          # ★★ v7 全面推理分析（13409样本，bad case可视化，原因分析，改进方案）
+docs/symfold_v7_deep_analysis_report.md             # ★ v7 深度分析（200ep完成后，5611样本全覆盖，家族/失败模式/数据异常）
+docs/symfold_v7_case_analysis_report.md             # v7 case 分析（F1=0、失败模式、RFAM 分析，@epoch 109）
+docs/symfold_v7_f1_zero_loss_analysis.md            # F1=0 的 loss 机制深度分析 → OHEM/FP penalty 动机
+docs/report_20260611.md                             # 2026-06-11 日报（case analysis + loss 分析 + 四项改进 + 续训）
+docs/symfold_v6_case_analysis_report.md             # v6 case 分析 → v7 转型动机
+docs/symfold_v6_inference_optimization.md           # v6 推理优化 → DST 设计灵感
 symfold/v6/README.md                                # v6 DASO 使用指南 + 消融方案
-docs/prifold_symflow_v5_improvements.md             # v5 改进报告
-docs/prifold_symflow_v4_walkthrough.md              # v4 完整 walkthrough
-docs/prifold_symflow_v4_improvements.md             # v4 改进点
-docs/prifold_symflow_v3_architecture_case_analysis.md # v3 架构与 bad-case 诊断
+docs/symfold_v5_improvements.md                     # v5 改进报告
+docs/symfold_v4_walkthrough.md                      # v4 完整 walkthrough
+docs/symfold_v4_improvements.md                     # v4 改进点
+docs/symfold_v3_architecture_case_analysis.md       # v3 架构与 bad-case 诊断
 docs/data_distribution_report.md                    # 数据集统计
+docs/data_experiments_dataset_guide.md              # 两个实验的数据集详细说明
 ```
 
 旧文档仅参考：
 
 ```text
-docs/prifold_symflow_v1_postmortem.md
-docs/prifold_symflow_v2_marsfix_architecture.md
-docs/prifold_symflow_improvement_plan.md
-docs/prifold_symflow_architecture.md
+docs/symfold_v1_postmortem.md
+docs/symfold_v2_marsfix_architecture.md
+docs/symfold_v1_improvement_plan.md
+docs/symfold_v1_architecture.md
 ```
 
 ---
 
-## 10. 数据和模型路径
+## 11. 数据和模型路径
 
 ```text
 ./data/
@@ -522,12 +583,14 @@ docs/prifold_symflow_architecture.md
 训练输出：
 
 ```text
-# v7 full（当前，训练中断待恢复）
+# v7 full（已完成 200 epochs）
 symfold/outputs/v7_full/history.json
 symfold/outputs/v7_full/test_eval_history.json
 symfold/outputs/v7_full/training_curves.png
 symfold/outputs/v7_full/gpu_stats.jsonl
-symfold/outputs/v7_full/model/
+symfold/outputs/v7_full/model/                      # best.pt + last.pt
+symfold/outputs/v7_full/case_analysis/              # 16 文件（CSV/JSON/PNG）
+symfold/outputs/v7_full/deep_analysis/              # 37 文件（全量深度分析，per-family/stage/failure mode）
 
 # v6 full（已完成分析）
 symfold/outputs/v6_full/model/best.pt
@@ -562,7 +625,7 @@ vocab_size=20
 
 ---
 
-## 11. 已知注意事项
+## 12. 已知注意事项
 
 1. `projection` 是把模型 score 后处理成合法 contact map 的步骤。
 2. v7 使用 score-based projection（budget_fraction=0.30, score_threshold=0.4）。
@@ -571,14 +634,18 @@ vocab_size=20
 5. `run_train.sh` 支持 v1-v7 自动入口选择。
 6. **v7 训练已完成**：200 epochs（2026-06-12 06:18），best val F1=0.6408，best test F1=0.6538。
 7. v7 BF16 混合精度：确保 MARS-LX 输出和 Axial Transformer 数值稳定。
-8. v7 消融配置（11个）在 `symfold/config/v7_ablations/`，待逐一运行。
+8. v7 消融配置（`symfold/config/v7/ablations/`）：目前磁盘上只有 6 个（loss 组件消融），新增 5 个（OHEM/FP/BP/Family）尚未创建 JSON 文件。
 9. `save_every=9999`：只保留 best.pt + last.pt，不再存中间 epoch checkpoint。
 10. **FamilyBalancedSampler 需配合 LengthBucketBatchSampler**：否则长短序列混合会 OOM。
 11. **LengthBucketBatchSampler.__len__ 已修复**：现在返回实际 batch 数（之前日志 `step=2160/901` 分母不准）。
+12. **深度分析已完成**（2026-06-12）：`symfold/analysis/deep_analysis_v7.py` 输出到 `symfold/outputs/v7_full/deep_analysis/`，文档见 `docs/v7_deep_analysis_report.md`。
+13. **数据异常发现**：7 个零配对样本（GT pairs=0），可能需要在训练中过滤。
+14. **全面推理分析已完成**（2026-06-15）：`symfold/analysis/comprehensive_v7_analysis.py` 输出到 `symfold/outputs/v7_full/comprehensive_analysis/`（100 张 bad case 卡片 + 9 类可视化 + CSV + report）。
+15. **最大失败模式是 shifted_prediction（33%）**：预测位置偏移 ±1-3 位，说明需要 position-aware loss 或 margin loss。
 
 ---
 
-## 12. 官方 PriFold baseline
+## 13. 官方 PriFold baseline
 
 主线 PriFold checkpoint 指标（2025-05-25, H20）：
 
@@ -592,7 +659,7 @@ vocab_size=20
 
 ---
 
-## 13. 版本演进总结
+## 14. 版本演进总结
 
 ```text
 v1-v3: 生成式 Flow Matching 初探（F1 ~0.40）
@@ -600,6 +667,70 @@ v4:    + ControlInject + Direct Head + Density Budget（F1=0.49）
 v5:    + Dice/Ratio Penalty + 大模型 26M（F1=0.62）
 v6:    + 模块化 Loss + 消融框架（F1=0.61，过预测改善但 F1 略降）
 v7:    ★ 转向纯判别式 DensityNet 3.56M（F1=0.654，已完成 200 epochs）
-       距 baseline 0.77 差距: ~15%，持续缩小中
-       下一步: OHEM + FP penalty + 碱基配对约束 + RFAM 过采样 消融实验
+       距 baseline 0.77 差距: ~15.2%，核心瓶颈 = Precision（FP 过多）
+       深度分析完成: 5611 样本全覆盖，家族/密度/长度/失败模式均分析
+       下一步: 创建并运行消融实验（OHEM + FP penalty + 碱基配对约束 + RFAM 过采样）
 ```
+
+---
+
+## 15. 下一步行动（优先级排序）
+
+```text
+1. 生成新消融配置 JSON（5个）
+   → 用 config/gen_ablation_configs.py 或手动创建到 symfold/config/v7/ablations/
+   → v7_ohem_only, v7_fp_penalty_only, v7_bp_compat_only, v7_family_balanced_only, v7_all_new
+
+2. 运行消融实验（推荐顺序）
+   → 优先: v7_ohem_only（直接解决 FP 稀释问题）
+   → 次优: v7_all_new（全部新特性开启，看整体天花板）
+   → 然后: v7_fp_penalty_only, v7_bp_compat_only, v7_family_balanced_only
+
+3. 消融结果分析
+   → 每个消融训练完成后运行 analysis/deep_analysis_v7.py 做对照分析
+   → 重点看: F1=0 数量变化、Precision 改善、低密度 bin 表现
+
+4. 后续方向（根据消融结果决定）
+   → 如果 OHEM 有效：考虑更激进的 neg_ratio 或结合 FP penalty
+   → 如果 BP compat 有效：考虑在 inference 时加入更多物理约束
+   → 如果 Family balanced 有效：考虑 curriculum learning
+   → 如果仍有 gap：考虑更大模型（增加 layers/hidden_dim）或 MARS 微调
+```
+
+---
+
+## 16. symfold 代码组织约定
+
+**目录结构原则**（2026-06-15 重组后确立，后续新增代码须遵循）：
+
+```text
+symfold/
+├── data.py, metrics.py              # 共享模块（数据加载、指标）保留在根
+├── train/                           # 所有训练相关（入口脚本、训练工具、shell 脚本）
+│   ├── train_v{N}.py              # 各版本训练入口
+│   ├── run_train.sh               # 统一启动脚本
+│   ├── run_gpu_monitor.sh         # GPU 监控补挂
+│   └── gpu_monitor.py             # GPU daemon
+├── eval/                            # 所有评估相关
+│   └── eval_v{N}*.py             # 各版本评估脚本
+├── analysis/                        # 所有数据分析与可视化
+│   ├── analyze_v{N}_cases.py      # case 分析
+│   ├── deep_analysis_v{N}.py      # 深度分析
+│   ├── visualize_*.py             # 可视化
+│   └── show_gpu_stats.py          # GPU 统计查看
+├── config/                          # 配置，按版本分目录
+│   ├── v{N}/                      # 各版本主配置 + ablations/ 子目录
+│   └── gen_ablation_configs.py    # 配置生成工具
+├── v{N}/                            # 模型代码（model.py, backbone, loss 等）
+├── outputs/                         # 训练输出（不整理，按 task_name 自动创建）
+└── logs/                            # 训练日志（不整理，按 task_name 自动创建）
+```
+
+**新增代码规则**：
+1. 新建训练入口 → 放 `train/`
+2. 新建评估脚本 → 放 `eval/`
+3. 新建分析/可视化脚本 → 放 `analysis/`
+4. 新建模型版本 → 创建 `v{N}/` 目录
+5. 新建配置 → 放 `config/v{N}/`
+6. Python import 使用完整模块路径：`from symfold.train.train_v7 import ...`
+7. `outputs/` 和 `logs/` 按 task_name 自动管理，不手动整理

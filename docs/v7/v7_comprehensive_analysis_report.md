@@ -39,42 +39,37 @@
 
 ## F1 与序列长度的关系
 
+
+我们首先统计了在所有数据（train/val/test）上，F1与RNA序列长度之间的关系，并绘制图表。
 ![F1 vs Length Trend](../../symfold/outputs/v7_full/comprehensive_analysis/f1_vs_length_trend.png)
+
+
 
 **关键观察**：
 - **Train（蓝）**：全长度范围 F1 > 0.85，长度 200+ 仍保持 ~0.90
 - **Val/Test（橙/红）**：长度 > 150 后 F1 明显下降（从 ~0.70 降到 ~0.55）
 - **泛化 gap 随长度增大**：短序列（<100）gap ~15%，长序列（300+）gap ~35%
 
+**结论**：在训练集上，模型表现与RNA序列长度关系不大。但是在测试集和验证集上， Length = 300附近｜Length = 400 + 附近，模型有比较明显的泛化性能下降。（从0.6 f1 score 跌至 0.4 f1 score）。序列长度确实对模型泛化性能有影响。
 
 
 
-
-### 2.2 多指标 vs 长度
-
-![Metrics vs Length](../../symfold/outputs/v7_full/comprehensive_analysis/metrics_vs_length.png)
-
-**关键观察**：
-- **Precision** 随长度增加急剧下降（Test: 从 ~0.70 降到 ~0.50）
-- **Recall** 相对稳定（Test: 维持 ~0.65-0.75）
-- **pred/gt ratio** 随长度增加而增大（越长越过预测）
-- 结论：**长序列问题的核心是 Precision 崩塌，而非 Recall 不足**
-
-### 2.3 Bad Case 比例 vs 长度
-
+随后，我们想要分析一下，模型的Bad case与序列长度是否有关（Bad case是否集中在某个长度区间），绘制了Bad case数量与RNA序列长度的图像。
 ![Bad Case Rate](../../symfold/outputs/v7_full/comprehensive_analysis/bad_case_rate.png)
 
 **关键观察**：
-- Train 上 bad case rate 几乎为 0（完全记忆）
+- Train 上 bad case rate 几乎为 0（模型完全能学会train set）
 - Val/Test 上：长度 > 200 后 bad case rate 快速升到 20-30%
-- 密度 < 0.15 的样本 bad case rate 高达 30-40%
+
+**结论**：长度在200-400的RNA序列构成了主要的Bad case。
+
+
 
 ---
 
-## 3. F1 与配对密度的关系
+## F1 与配对密度的关系
 
-### 3.1 F1 随密度变化趋势
-
+下图是F1在 train/val/test 上随样本配对密度的变化图。
 ![F1 vs Density Trend](../../symfold/outputs/v7_full/comprehensive_analysis/f1_vs_density_trend.png)
 
 **关键观察**：
@@ -82,67 +77,28 @@
 - **中等密度（0.20-0.30）**：Val/Test F1 在 ~0.65-0.70
 - **高密度（>0.30）**：Val/Test F1 可达 ~0.75-0.80
 - Train 在所有密度上都 > 0.85
-- 结论：**低密度样本是最难泛化的，改善空间最大**
 
-### 3.2 多指标 vs 密度
+**结论**：配对密度在0.1左右的样本比较难学习，配对密度较高的样本反而F1更高。
 
+
+
+
+此外，我们又分析了多项指标与配对密度之间的关系( precision / recall / (pred/gt))。 如下图所示。
 ![Metrics vs Density](../../symfold/outputs/v7_full/comprehensive_analysis/metrics_vs_density.png)
 
 **关键观察**：
 - 低密度时 pred/gt ratio 极高（>2.0）→ 严重过预测
 - 高密度时 pred/gt ≈ 1.0 → 预测数量准确
-- Precision 随密度增加单调提升
-- 结论：**模型对"有多少对配对"的估计在低密度时严重偏高**
+
+**结论**：模型在低配对密度的样本上，很容易过预测。
 
 ---
 
-## 4. 密度 × 长度 交互效应
 
-### 4.1 不同密度区间下 F1 vs 长度
-
-![Density Length Interaction](../../symfold/outputs/v7_full/comprehensive_analysis/density_length_interaction.png)
-
-**关键观察**：
-- 低密度 + 长序列 = 最差组合（F1 < 0.30）
-- 高密度序列即使很长（300+），F1 仍可保持 ~0.70
-- **密度比长度对 F1 的影响更大**
-
-### 4.2 F1 热力图（长度 × 密度网格）
-
-![F1 Heatmap](../../symfold/outputs/v7_full/comprehensive_analysis/f1_heatmap_length_density.png)
-
----
-
-## 5. F1 与结构复杂度的关系
-
-### 5.1 F1 vs 各复杂度指标趋势
+## F1 与伪结的关系
 
 ![F1 vs Complexity Trends](../../symfold/outputs/v7_full/comprehensive_analysis/f1_vs_complexity_trends.png)
 
-**关键观察**：
-- **Stem 数量**：Stem 数 > 10 时 Val/Test F1 明显下降
-- **最大 Stem 长度**：更长的 Stem 对预测有利（F1 更高）
-- **分支因子**：高分支结构更难预测
-- **平均配对距离**：距离 > 60 后 F1 下降
-- **最大配对距离**：max_dist > 150 的样本 F1 极低
-- **伪结**：少量伪结（1-5）对 F1 影响不大，大量伪结（>20）影响显著
-
----
-
-## 6. 泛化 Gap 分析
-
-### 6.1 按长度/密度的泛化 Gap
-
-![Generalization Gap](../../symfold/outputs/v7_full/comprehensive_analysis/generalization_gap.png)
-
-**关键观察**：
-- **长度维度**：gap 在 200-400 区间最大（~30%），短序列 gap 较小
-- **密度维度**：低密度 gap ~35%，高密度 gap ~20%
-- 结论：长序列 + 低密度 = 泛化最差的区域
-
----
-
-## 伪结分析
 
 ![Pseudoknot Analysis](../../symfold/outputs/v7_full/comprehensive_analysis/pseudoknot_analysis.png)
 
@@ -153,7 +109,22 @@
 | 无伪结样本平均 F1 | 0.9056 | 0.6370 | 0.6557 |
 | 伪结导致的 F1 下降 | -0.0396 | -0.0528 | +0.0114 |
 
-**结论**：伪结对 Val 有负面影响（-5.3%），但 Test 上几乎无影响。伪结不是主要失败原因。
+**结论**：伪结数=15时，模型在测试集和验证集上表现最差。伪结对 Val 有负面影响（-5.3%），但 Test 上几乎无影响。伪结不是主要失败原因。
+
+
+---
+
+## 6.1 按长度/密度的绘制泛化 Gap图
+
+![Generalization Gap](../../symfold/outputs/v7_full/comprehensive_analysis/generalization_gap.png)
+
+**关键观察**：
+- **长度维度**：gap 在 200-400 区间最大（~30%），短序列 gap 较小
+- **密度维度**：低密度 gap ~35%，高密度 gap ~20%
+
+
+**结论**：长序列 + 低密度 = 泛化最差的区域
+
 
 ---
 
@@ -161,26 +132,9 @@
 
 ---
 
-## 9. Bad Case 全面分析 (F1 < 0.3)
+## 9. Bad Case 全面分析
 
-### 9.1 Bad Case 特征统计
-
-| 特征 | Train | Val | Test |
-|------|-------|-----|------|
-| 平均长度 | 57.00 | 133.94 | 142.96 |
-| 平均密度 | 0.10 | 0.20 | 0.19 |
-| 平均 Stem 数 | 2.00 | 7.25 | 7.89 |
-| 平均伪结交叉数 | 0.00 | 3.34 | 6.53 |
-| 平均配对距离 | 12.14 | 45.63 | 45.97 |
-| 最大配对距离 | 23.00 | 91.50 | 97.32 |
-| 分支因子 | 2.00 | 7.25 | 7.89 |
-| Near-miss FP 比例 | 0.50 | 0.39 | 0.36 |
-
-### 9.2 Bad Case 分布可视化
-
-![Bad Case Distributions](../../symfold/outputs/v7_full/comprehensive_analysis/bad_case_distributions.png)
-
-### 9.3 失败模式分类
+### 失败模式分类
 
 ![Failure Mode Summary](../../symfold/outputs/v7_full/comprehensive_analysis/failure_mode_summary.png)
 
@@ -206,11 +160,13 @@
 | severe_overpredict | 11 | 6.7% | 严重过预测 |
 | pseudoknot_failure | 3 | 1.8% | 伪结导致失败 |
 
+**结论**：无论是 VAL 还是 TEST，预测的偏移都是Bad Case出现的主要模式。
+
+
 ---
 
 ## 10. 成功 vs 失败案例对比
 
-### 10.1 统计对比
 
 ![Success vs Failure Comparison](../../symfold/outputs/v7_full/comprehensive_analysis/success_vs_failure_comparison.png)
 
@@ -376,3 +332,21 @@
 |------|------|
 | `all_samples_metrics.csv` | 13409 样本逐条指标（2.4MB） |
 | `summary.json` | 核心汇总指标 |
+
+
+
+会有很多badcase是这种情况 
+
+![](/symfold/outputs/v7_full/comprehensive_analysis/bad_cases/097_val_F1=0.049_L=107_sample_542_0.png)
+
+![](//symfold/outputs/v7_full/comprehensive_analysis/bad_cases/092_test_F1=0.038_L=70_sample_51_0.png)
+
+![](//symfold/outputs/v7_full/comprehensive_analysis/bad_cases/089_val_F1=0.036_L=86_sample_306_0.png)
+
+
+
+还有一些发现就是有的样本本身的Ground Truth就是没有配对
+
+![](//symfold/outputs/v7_full/comprehensive_analysis/bad_cases/081_val_F1=0.000_L=36_sample_0_2.png)
+
+

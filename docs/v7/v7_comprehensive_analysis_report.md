@@ -19,7 +19,7 @@
 2. Bad case 与配对密度是否有关？低密度样本表现如何？
 3. 伪结对模型表现的影响有多大？
 4. Bad case 的失败模式有哪些？哪种模式最主要？
-5. 同长度/同密度下，成功与失败案例的 Contact Map 有何区别？
+5. 同长度同密度下，成功与失败案例的 Contact Map 有何区别？
 6. 数据集本身的非标准配对对模型学习的影响？
 
 ### 主要结论
@@ -186,77 +186,62 @@
 
 **结论**：无论是 VAL 还是 TEST，预测的偏移都是Bad Case出现的主要模式。
 
+---
+
+### 同长度 + 同密度下，好 Case 与 Bad Case 的结构差异
+
+为了排除长度和密度的混淆因素，我们将 test 集按 (length_bin=50, density_bin=0.05) 分组，只在**同一组内**对比 Good (F1≥0.7) 和 Bad (F1<0.3) 案例的结构特征。共找到 606 个 good case 和 154 个 bad case 可做配对比较。
+
+**关键结构特征对比**：
+
+| 指标 | Good Cases (mean) | Bad Cases (mean) | 差异 | 解读 |
+|------|-------------------|------------------|------|------|
+| **Stem 数量** | 5.17 | 7.44 | **+44%** | Bad case 结构更碎片化 |
+| **最大 Stem 长度** | 8.43 | 6.75 | **-20%** | Bad case 的 stem 更短 |
+| **平均 Stem 长度** | 5.38 | 3.68 | **-32%** | Bad case 由很多短 stem 构成 |
+| **分支因子** | 5.17 | 7.44 | **+44%** | Bad case 拓扑更复杂 |
+| 平均配对距离 | 42.99 | 44.21 | +3% | 差异不大 |
+| 最大配对距离 | 84.37 | 91.33 | +8% | Bad case 略有更长距离配对 |
+| 伪结数量 | 2.84 | 2.98 | +5% | 差异不显著 |
+| **Pred/GT 比率** | 1.10 | 1.90 | **+73%** | Bad case 严重过预测 |
+| **Near-miss 占比** | 0.68 | 0.36 | **-47%** | Bad case 的 FP 更"离谱"，不是偏移而是完全错 |
+
+**核心发现**：
+
+> **在相同长度和密度条件下，决定模型成败的不是配对距离，而是结构的碎片化程度。**
+
+具体来说：
+1. **Bad cases 的 stem 数量多 44%，但每个 stem 短 32%** — 结构是"很多短 stem 散布"而非"几个长 stem 整齐排列"。模型对这种碎片化结构学习困难。
+2. **Bad cases 过预测严重 (pred/gt=1.90)** — 面对碎片化结构时，模型倾向于"猜"更多配对来覆盖，导致大量 FP。
+3. **Bad cases 的 FP 更"离谱" (near-miss 只有 36% vs good 的 68%)** — Good cases 即使有 FP 也大多在 GT 附近（偏移），Bad cases 的 FP 则完全在错误位置。
+4. **配对距离不是决定因素** — 平均配对距离差异仅 3%，伪结差异仅 5%，这两个不是同条件下的分水岭。
+
+**典型对比案例**：
+
+| 条件 | Good Case | Bad Case | 关键差别 |
+|------|-----------|----------|----------|
+| L=37, d=0.24 | 1 stem, 长度 9, F1=1.0 | 2 stems, 最长 6, PK=30, F1=0.26 | 碎片+伪结 |
+| L=46, d=0.13 | 1 stem, 长度 6, F1=1.0 | 1 stem, 长度 5, dist=17→21, F1=0.29 | 配对跨度大+near-miss=71% |
+| L=56, d=0.04 | 1 stem, 2 pairs, F1=1.0 | 1 stem, 1 pair, 但模型预测 16 对, F1=0.0 | 极低密度+严重过预测 |
+| L=77, d=0.05 | 1 stem, 4 pairs, dist=71, F1=1.0 | 1 stem, 5 pairs, dist=23, 但模型预测 18 对, F1=0.0 | 过预测 |
+
+**Contact Map 可视化对比**：
+
+下图展示了多组同长度+同密度条件下 Good Case 和 Bad Case 的 GT / 预测 / Diff 对比。可以直观看到：Good case 的 GT 配对集中在少量整齐的反对角线（长 stem），而 Bad case 的 GT 配对散布多处（碎片 stem）；Bad case 的 Diff 图中红色（FP）散布全图。
+
+![同长度同密度 Good vs Bad 对比](../../symfold/outputs/v7_full/comprehensive_analysis/matched_length_density_comparison.png)
+
+**总结**：同长度同密度下，模型的成败主要由以下因素决定（按重要性排序）：
+1. **结构碎片化** — 多个短 stem vs 少量长 stem（最重要）
+2. **模型过预测倾向** — 对碎片结构模型缺乏信心，倾向多预测
+3. **FP 质量** — Good case 的 FP 是"差一点对"，Bad case 的 FP 是"完全瞎猜"
+4. **配对距离** — 影响不大（仅 +3%）
 
 ---
 
-### 同长度下 Contact Map 对比
-
-**Test 集，长度 100-200：**
-
-![Paired Comparison Test 100-200](../../symfold/outputs/v7_full/comprehensive_analysis/paired_comparison_test_100-200.png)
-
-**Test 集，长度 200-300：**
-
-![Paired Comparison Test 200-300](../../symfold/outputs/v7_full/comprehensive_analysis/paired_comparison_test_200-300.png)
-
-**Test 集，长度 300+：**
-
-![Paired Comparison Test 300+](../../symfold/outputs/v7_full/comprehensive_analysis/paired_comparison_test_300plus.png)
 
 
-**结论** ： 我尝试寻找一些规律，看了大概100个case，没找出来规律。（）
-
----
-
-### 同密度下 Contact Map 对比
-
-**Test 集，低密度（density < 0.15）：**
-
-![Density Comparison Test Low](../../symfold/outputs/v7_full/comprehensive_analysis/density_comparison_test_low_lt0.15.png)
-
-**Test 集，中密度（density 0.15-0.30）：**
-
-![Density Comparison Test Mid](../../symfold/outputs/v7_full/comprehensive_analysis/density_comparison_test_mid_0.15-0.30.png)
-
-**Test 集，高密度（density 0.30-0.45）：**
-
-![Density Comparison Test High](../../symfold/outputs/v7_full/comprehensive_analysis/density_comparison_test_high_0.30-0.45.png)
-
-> **注**：超高密度（density ≥ 0.45）区间在 Test 集上不存在同时包含成功（F1≥0.7）和失败（F1<0.3）案例的情况，因此未生成对比图。
-
-**结论**：
-- **低密度（<0.15）**：失败案例的 GT 配对数极少（仅几对），模型倾向于过预测——Diff 图中 FP（红）远多于 TP（绿）。成功案例的 GT 结构相对集中在对角线附近，模型能较好匹配。
-- **中密度（0.15-0.30）**：失败案例呈现明显的"位置偏移"模式——GT 配对沿对角线分布较规整，但预测散乱，FP 散布整个矩阵。成功案例的配对结构更紧凑、stems 更明确。
-- **高密度（0.30-0.45）**：失败案例多为长序列，GT 结构复杂（多 stem、长距离配对），模型预测虽然在近对角线区域有 TP，但远离对角线的配对几乎全部 miss（FN 蓝色显著）。成功案例的配对多集中在近对角线。
-- **总体规律**：同密度下，失败案例往往具有更复杂的拓扑结构（多分支、长距离配对、伪结），而成功案例的配对更"局部"、更规整。密度本身不是决定因素，配对的空间分布（局部 vs 全局）才是关键。
-
----
-
-
-## 数据分析中的发现
-
-
-
-
-会有很多badcase是这种情况 
-
-![](/symfold/outputs/v7_full/comprehensive_analysis/bad_cases/097_val_F1=0.049_L=107_sample_542_0.png)
-
-![](/symfold/outputs/v7_full/comprehensive_analysis/bad_cases/092_test_F1=0.038_L=70_sample_51_0.png)
-
-![](/symfold/outputs/v7_full/comprehensive_analysis/bad_cases/089_val_F1=0.036_L=86_sample_306_0.png)
-
-
-
-还有一些发现就是有的样本本身的Ground Truth就是没有配对，配对密度为0，但是我们预测的是有配对。
-
-![](/symfold/outputs/v7_full/comprehensive_analysis/bad_cases/081_val_F1=0.000_L=36_sample_0_2.png)
-
-
-
-
-
-### bpRNA数据集非标准配对比例很高
+## bpRNA数据集非标准配对比例很高
 
 理论上来说，AU GC GU的配对才是合法的，其他配对都是非法的。但是实际上，模型在预测时，会预测出一些非canonical的配对。所以，我们需要分析模型预测的配对是否是canonical的。我们对数据集中的配对做了一个统计，结果如下：
 

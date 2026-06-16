@@ -625,6 +625,81 @@ def plot_paired_comparison_at_similar_conditions(all_results_by_stage, out_dir):
             plt.close()
 
 
+def plot_paired_comparison_by_density(all_results_by_stage, out_dir):
+    """For similar density, compare success vs failure contact maps."""
+    density_bins = {
+        'low_lt0.15': (0.0, 0.15),
+        'mid_0.15-0.30': (0.15, 0.30),
+        'high_0.30-0.45': (0.30, 0.45),
+        'vhigh_0.45+': (0.45, 1.01),
+    }
+    display_names = {
+        'low_lt0.15': 'Density < 0.15',
+        'mid_0.15-0.30': 'Density 0.15-0.30',
+        'high_0.30-0.45': 'Density 0.30-0.45',
+        'vhigh_0.45+': 'Density ≥ 0.45',
+    }
+
+    for stage, results in all_results_by_stage.items():
+        for bin_name, (lo, hi) in density_bins.items():
+            bin_results = [r for r in results if lo <= r['density'] < hi]
+            success = sorted([r for r in bin_results if r['f1'] >= 0.7], key=lambda x: -x['f1'])[:3]
+            failure = sorted([r for r in bin_results if r['f1'] < 0.3], key=lambda x: x['f1'])[:3]
+
+            if not success or not failure:
+                continue
+
+            n_pairs = min(3, len(success), len(failure))
+            fig, axes = plt.subplots(n_pairs * 2, 3, figsize=(12, n_pairs * 2 * 3))
+            if n_pairs * 2 == 2:
+                axes = axes.reshape(2, 3)
+            fig.suptitle(f'{stage} | {display_names[bin_name]}: Success vs Failure Contact Maps',
+                         fontsize=12, fontweight='bold')
+
+            for i in range(n_pairs):
+                # Success case
+                row = i * 2
+                s = success[i]
+                L = s['length']
+                axes[row, 0].imshow(s['gt_map'], cmap='Blues', vmin=0, vmax=1, aspect='equal')
+                axes[row, 0].set_title(f"GT | {s['name'][:20]}", fontsize=7)
+                axes[row, 0].set_ylabel(f"SUCCESS\nF1={s['f1']:.3f}\nL={L}, d={s['density']:.3f}", fontsize=7)
+                axes[row, 1].imshow(s['pred_map'], cmap='Oranges', vmin=0, vmax=1, aspect='equal')
+                axes[row, 1].set_title('Pred', fontsize=7)
+                diff = np.zeros((L, L, 3))
+                diff[(s['pred_map'] > 0.5) & (s['gt_map'] > 0.5)] = [0.2, 0.8, 0.2]
+                diff[(s['pred_map'] > 0.5) & (s['gt_map'] < 0.5)] = [0.9, 0.2, 0.2]
+                diff[(s['pred_map'] < 0.5) & (s['gt_map'] > 0.5)] = [0.2, 0.4, 0.9]
+                axes[row, 2].imshow(diff, aspect='equal')
+                axes[row, 2].set_title('Diff', fontsize=7)
+
+                # Failure case
+                row = i * 2 + 1
+                f = failure[i]
+                L = f['length']
+                axes[row, 0].imshow(f['gt_map'], cmap='Blues', vmin=0, vmax=1, aspect='equal')
+                axes[row, 0].set_title(f"GT | {f['name'][:20]}", fontsize=7)
+                axes[row, 0].set_ylabel(f"FAILURE\nF1={f['f1']:.3f}\nL={L}, d={f['density']:.3f}", fontsize=7)
+                axes[row, 1].imshow(f['pred_map'], cmap='Oranges', vmin=0, vmax=1, aspect='equal')
+                axes[row, 1].set_title('Pred', fontsize=7)
+                diff = np.zeros((L, L, 3))
+                diff[(f['pred_map'] > 0.5) & (f['gt_map'] > 0.5)] = [0.2, 0.8, 0.2]
+                diff[(f['pred_map'] > 0.5) & (f['gt_map'] < 0.5)] = [0.9, 0.2, 0.2]
+                diff[(f['pred_map'] < 0.5) & (f['gt_map'] > 0.5)] = [0.2, 0.4, 0.9]
+                axes[row, 2].imshow(diff, aspect='equal')
+                axes[row, 2].set_title('Diff', fontsize=7)
+
+            for ax_row in axes:
+                for ax in ax_row:
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+
+            plt.tight_layout(rect=[0, 0, 1, 0.95])
+            fig.savefig(out_dir / f'density_comparison_{stage}_{bin_name}.png',
+                        dpi=120, bbox_inches='tight')
+            plt.close()
+
+
 def plot_pairing_distance_distributions(all_results_by_stage, out_dir):
     """Plot pairing distance distributions for bad vs good cases."""
     fig, axes = plt.subplots(2, 3, figsize=(16, 10))
@@ -1028,6 +1103,9 @@ def main():
                         help='Max bad cases to visualize individually')
     parser.add_argument('--bad_threshold', type=float, default=0.3,
                         help='F1 threshold for bad cases')
+    parser.add_argument('--only', type=str, default=None,
+                        choices=['density_comparison', 'all'],
+                        help='Only run specific analysis (default: all)')
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -1110,40 +1188,55 @@ def main():
         print(f'  Bad cases (F1<{args.bad_threshold}): {len(bad_cases)}/{len(results)}')
 
     # ============================================================
-    # Generate all visualizations
+    # Generate visualizations
     # ============================================================
+    run_only = args.only
+
+    if run_only == 'density_comparison':
+        # Only run density comparison
+        print(f'\n{"="*60}')
+        print('Generating density comparison only...')
+        print(f'{"="*60}')
+        plot_paired_comparison_by_density(all_results_by_stage, out_dir)
+        print('Done!')
+        return
+
     print(f'\n{"="*60}')
     print('Generating visualizations...')
     print(f'{"="*60}')
 
     # 1. F1 distribution per stage
-    print('\n[1/9] F1 distributions...')
+    print('\n[1/10] F1 distributions...')
     plot_distribution_comparison(
         all_results_by_stage['train'], all_results_by_stage['val'], all_results_by_stage['test'],
         'f1', 'F1 Score Distribution', 'F1', out_dir / 'f1_distribution.png', bins=30)
 
     # 2. Bad case distributions
-    print('[2/9] Bad case distributions...')
+    print('[2/10] Bad case distributions...')
     plot_bad_case_distributions(bad_cases_by_stage, out_dir)
 
     # 3. Success vs failure comparison
-    print('[3/9] Success vs failure comparison...')
+    print('[3/10] Success vs failure comparison...')
     plot_success_vs_failure_comparison(all_results_by_stage, out_dir)
 
     # 4. Paired comparison at similar conditions
-    print('[4/9] Paired comparisons (contact maps)...')
+    print('[4/10] Paired comparisons by length (contact maps)...')
     plot_paired_comparison_at_similar_conditions(all_results_by_stage, out_dir)
 
+    # 4b. Paired comparison by density
+    print('[4b/10] Paired comparisons by density (contact maps)...')
+    plot_paired_comparison_by_density(all_results_by_stage, out_dir)
+
     # 5. Pairing distance distributions
-    print('[5/9] Pairing distance distributions...')
+    print('[5/10] Pairing distance distributions...')
     plot_pairing_distance_distributions(all_results_by_stage, out_dir)
 
     # 6. Pseudoknot analysis
-    print('[6/9] Pseudoknot analysis...')
+    print('[6/10] Pseudoknot analysis...')
     plot_pseudoknot_analysis(all_results_by_stage, out_dir)
 
     # 7. Complexity vs F1
-    print('[7/9] Complexity vs F1...')
+    print('[7/10] Complexity vs F1...')
     plot_complexity_vs_f1(all_results_by_stage, out_dir)
 
     # 8. Failure mode summary

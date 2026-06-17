@@ -1,0 +1,98 @@
+{
+  "project_name": "prifold_symflow",
+  "task_name": "v10_ddp",
+  "device": "auto",
+
+  "paths": {
+    "data_dir": "/root/aigame/dannyyan/PriFold/data",
+    "pretrained_lm_dir": "/root/aigame/dannyyan/PriFold/model",
+    "log_dir": "/root/aigame/dannyyan/PriFold/symfold/logs/v10_ddp",
+    "output_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v10_ddp",
+    "model_save_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v10_ddp/model"
+  },
+
+  "model": {
+    "version": "v10",
+    "mars_scale": "lx",
+    "mars_dim": 1056,
+    "mars_n_attn_layers": 6,
+    "mars_n_heads": 12,
+    "mars_hidden_layer_indices": [3, 6, 9, 12]
+  },
+
+  "v10": {
+    "freeze_mars": "partial",
+    "unfreeze_last_n": 2,
+    "mars_lr": 1e-5,
+    "hidden_dim": 192,
+    "num_layers": 8,
+    "num_heads": 6,
+    "dim_head": 32,
+    "ff_mult": 4,
+    "dropout": 0.2,
+    "drop_path": 0.15,
+    "use_rope": true
+  },
+
+  "loss": {
+    "focal_gamma": 1.0,
+    "pos_weight_base": 99.0,
+    "dice_weight": 0.5,
+    "dst_weight": 0.5,
+    "dst_low_threshold": 0.05,
+    "dst_tversky_alpha": 0.7,
+    "dst_tversky_beta": 0.3,
+    "pair_count_weight": 0.3,
+    "ratio_penalty_weight": 0.2,
+    "ratio_penalty_threshold": 1.20,
+    "density_loss_weight": 0.3,
+    "ohem_enabled": true,
+    "ohem_neg_ratio": 3,
+    "fp_penalty_enabled": true,
+    "fp_penalty_weight": 2.0,
+    "bp_compat_enabled": false,
+    "bp_compat_weight": 0.0,
+    "bp_compat_in_inference": false,
+    "shift_loss_enabled": true,
+    "shift_loss_weight": 0.8,
+    "shift_radius": 2
+  },
+
+  "training": {
+    "dataset_mode": "bprna",
+    "batch_size": 4,
+    "max_sq_tokens": 200000,
+    "gradient_accumulation_steps": 6,
+    "lr": 5e-4,
+    "weight_decay": 0.02,
+    "epochs": 200,
+    "warmup_epochs": 15,
+    "patience": 40,
+    "save_every": 9999,
+    "grad_clip": 0.5,
+    "amp_dtype": "bf16",
+    "max_len_filter": 490,
+    "augmentation": {"enabled": true, "select": 0.20, "replace": 0.40},
+    "curriculum": {
+      "hard_oversample": 1.0,
+      "start_epoch": 999
+    },
+    "num_workers": 8,
+    "pin_memory": true,
+    "prefetch_factor": 4,
+    "log_every": 20,
+    "ddp": {
+      "enabled": true,
+      "backend": "nccl",
+      "find_unused_parameters": true
+    }
+  },
+
+  "sampling": {
+    "use_density_budget": true,
+    "default_budget_fraction": 0.30,
+    "score_threshold": 0.43,
+    "length_decay": 0.15,
+    "budget_floor": 0.6
+  }
+}

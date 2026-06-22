@@ -1,15 +1,15 @@
 {
   "project_name": "prifold_symflow",
-  "task_name": "v10_ddp",
+  "task_name": "v9_unfreeze",
   "device": "cuda:0",
   "seed": 3407,
 
   "paths": {
     "data_dir": "/root/aigame/dannyyan/PriFold/data",
     "pretrained_lm_dir": "/root/aigame/dannyyan/PriFold/model",
-    "log_dir": "/root/aigame/dannyyan/PriFold/symfold/logs/v10_ddp",
-    "output_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v10_ddp",
-    "model_save_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v10_ddp/model"
+    "log_dir": "/root/aigame/dannyyan/PriFold/symfold/logs/v9_unfreeze",
+    "output_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v9_unfreeze",
+    "model_save_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v9_unfreeze/model"
   },
 
   "model": {
@@ -60,8 +60,8 @@
 
   "training": {
     "dataset_mode": "bprna",
-    "batch_size": 8,
-    "gradient_accumulation_steps": 3,
+    "batch_size": 4,
+    "gradient_accumulation_steps": 6,
     "lr": 5e-4,
     "mars_lr": 5e-6,
     "weight_decay": 0.02,

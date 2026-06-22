@@ -539,8 +539,9 @@ class DensityNetProPlus(nn.Module):
     @torch.no_grad()
     def predict(self, batch: dict, budget_fraction: float = 0.30,
                 use_density_budget: bool = True, score_threshold: float = 0.43,
-                length_decay: float = 0.15, budget_floor: float = 0.6):
-        """Inference — [P4] 不过滤非标准配对。"""
+                length_decay: float = 0.15, budget_floor: float = 0.6,
+                decode_mode: str = 'topk'):
+        """Inference — [P4] 不过滤非标准配对。decode_mode: 'topk' | 'matching'."""
         contact_mask = batch['contact_mask']
         seq_oh = batch.get('seq_oh')
         set_len = contact_mask.shape[-1]
@@ -586,16 +587,34 @@ class DensityNetProPlus(nn.Module):
 
             # Top-k
             k = int(max_pairs[i].item())
-            flat = candidates.view(-1)
-            n_valid = (flat > 0).sum().item()
-            topk_vals, topk_idx = flat.topk(min(k, n_valid))
-
             contact_map = torch.zeros(L, L, device=s.device)
-            if topk_vals.numel() > 0:
-                rows = topk_idx // L
-                cols = topk_idx % L
-                contact_map[rows, cols] = 1.0
-                contact_map[cols, rows] = 1.0
+            flat = candidates.view(-1)
+            if decode_mode == 'matching':
+                n_valid = int((flat > 0).sum().item())
+                if n_valid > 0:
+                    n_take = min(max(k * 4, k + 8), n_valid)
+                    vals, idx = flat.topk(n_take)
+                    rows = (idx // L).tolist(); cols = (idx % L).tolist()
+                    used = torch.zeros(L, dtype=torch.bool, device=s.device)
+                    chosen = 0
+                    for r, c, v in zip(rows, cols, vals.tolist()):
+                        if v <= 0:
+                            break
+                        if used[r] or used[c]:
+                            continue
+                        contact_map[r, c] = 1.0; contact_map[c, r] = 1.0
+                        used[r] = True; used[c] = True
+                        chosen += 1
+                        if chosen >= k:
+                            break
+            else:
+                n_valid = (flat > 0).sum().item()
+                topk_vals, topk_idx = flat.topk(min(k, n_valid))
+                if topk_vals.numel() > 0:
+                    rows = topk_idx // L
+                    cols = topk_idx % L
+                    contact_map[rows, cols] = 1.0
+                    contact_map[cols, rows] = 1.0
             pred_maps.append(contact_map)
 
         pred = torch.stack(pred_maps).unsqueeze(1)

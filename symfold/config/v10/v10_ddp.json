@@ -62,11 +62,11 @@
     "dataset_mode": "bprna",
     "batch_size": 8,
     "gradient_accumulation_steps": 3,
-    "lr": 5e-4,
-    "mars_lr": 5e-6,
+    "lr": 1e-4,
+    "mars_lr": 1e-6,
     "weight_decay": 0.02,
-    "epochs": 100,
-    "warmup_epochs": 10,
+    "epochs": 60,
+    "warmup_epochs": 3,
     "patience": 30,
     "save_every": 9999,
     "grad_clip": 0.5,
@@ -77,10 +77,10 @@
     "num_workers": 4,
     "pin_memory": true,
     "compile_model": false,
-    "test_eval_every": 20,
+    "test_eval_every": 10,
     "test_stages": ["bprna-test"],
     "auto_resume": true,
-    "warm_start_from": "/root/aigame/dannyyan/PriFold/symfold/outputs/v9_ddp/model/best.pt"
+    "finetune_from": "/root/aigame/dannyyan/PriFold/symfold/outputs/v10_ddp/model/best.pt"
   },
 
   "sampling": {

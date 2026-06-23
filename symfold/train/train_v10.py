@@ -244,11 +244,17 @@ def plot_curves(history, output_dir, logger):
 
         # 4. Learning Rate
         ax = axes[1, 1]
-        if 'lr_mars' in history[0]:
-            ax.plot(epochs, [h['lr_mars'] for h in history], 'gray', label='mars lr')
-            ax.plot(epochs, [h['lr_head'] for h in history], 'k-', label='head lr')
-        elif 'lr_mult' in history[0]:
-            ax.plot(epochs, [h['lr_mult'] for h in history], 'gray', label='lr multiplier')
+        lr_epochs = [h['epoch'] for h in history if 'lr_mars' in h]
+        lr_mars_vals = [h['lr_mars'] for h in history if 'lr_mars' in h]
+        lr_head_vals = [h['lr_head'] for h in history if 'lr_head' in h]
+        if lr_mars_vals:
+            ax.plot(lr_epochs, lr_mars_vals, 'gray', label='mars lr')
+            ax.plot(lr_epochs, lr_head_vals, 'k-', label='head lr')
+            ax.set_yscale('log')
+        elif any('lr_mult' in h for h in history):
+            mult_epochs = [h['epoch'] for h in history if 'lr_mult' in h]
+            mult_vals = [h['lr_mult'] for h in history if 'lr_mult' in h]
+            ax.plot(mult_epochs, mult_vals, 'gray', label='lr multiplier')
         ax.set_title('Learning Rate'); ax.set_xlabel('epoch'); ax.set_ylabel('lr')
         ax.legend(); ax.grid(True)
 
@@ -346,33 +352,59 @@ def main():
         num_workers=tcfg.get('num_workers', 4), pin_memory=True)
     val_loader = DataLoader(val_ds, batch_size=1, shuffle=False, collate_fn=collate, num_workers=4)
 
-    # Resume
+    # Resume or finetune
     history = []
     best_f1 = 0.0
     patience_cnt = 0
     start_epoch = 0
+    finetune_from = tcfg.get('finetune_from')
+
+    # Load existing history from output_dir if exists (for continuation on same experiment)
+    history_path = output_dir / 'history.json'
+    if history_path.exists():
+        history = json.loads(history_path.read_text())
+        logger.info(f'[History] loaded {len(history)} entries from {history_path}')
+
     if last_path.exists() and tcfg.get('auto_resume', True):
+        # Standard resume: load model + optimizer + epoch
         ckpt = torch.load(last_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt['model'])
         optimizer.load_state_dict(ckpt['optimizer'])
-        history = ckpt.get('history', [])
         best_f1 = ckpt.get('best_f1', 0.0)
         start_epoch = ckpt.get('epoch', -1) + 1
+        patience_cnt = ckpt.get('patience_cnt', 0)
         logger.info(f'[Resume] epoch={start_epoch} best_f1={best_f1:.4f}')
+    elif finetune_from:
+        # Finetune mode: load model weights only, fresh optimizer, continue epoch numbering
+        ckpt = torch.load(finetune_from, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt['model'])
+        best_f1 = ckpt.get('best_f1', 0.0)
+        # Continue from the last epoch in history
+        if history:
+            start_epoch = history[-1]['epoch'] + 1
+        logger.info(f'[Finetune] from {finetune_from}, best_f1={best_f1:.4f}, start_epoch={start_epoch}, fresh optimizer')
 
     # Train
-    epochs = tcfg.get('epochs', 100)
+    n_epochs = tcfg.get('epochs', 100)
+    end_epoch = start_epoch + n_epochs
     warmup = tcfg.get('warmup_epochs', 10)
     patience = tcfg.get('patience', 30)
     test_every = tcfg.get('test_eval_every', 20)
 
-    for epoch in range(start_epoch, epochs):
+    # Set base LR for each param group (needed for cosine schedule after resume)
+    base_lrs = [mars_lr, head_lr]
+    for i, g in enumerate(optimizer.param_groups):
+        g['_base_lr'] = base_lrs[i]
+
+    logger.info(f'[Train] start_epoch={start_epoch} end_epoch={end_epoch} n_epochs={n_epochs}')
+
+    for epoch in range(start_epoch, end_epoch):
         train_sampler.set_epoch(epoch)
-        mult = lr_schedule(epoch, warmup, epochs)
+        # LR schedule relative to this training phase
+        local_epoch = epoch - start_epoch
+        mult = lr_schedule(local_epoch, warmup, n_epochs)
         for g in optimizer.param_groups:
-            g['lr'] = g.get('_base_lr', g['lr']) * mult
-            if '_base_lr' not in g:
-                g['_base_lr'] = g['lr'] / mult if mult > 0 else g['lr']
+            g['lr'] = g['_base_lr'] * mult
         logger.info(f'[LR] e{epoch} mult={mult:.4f} mars_lr={optimizer.param_groups[0]["lr"]:.2e} head_lr={optimizer.param_groups[1]["lr"]:.2e}')
 
         train_avg = train_one_epoch(model, train_loader, optimizer, device, config, logger, epoch)
@@ -414,7 +446,7 @@ def main():
             logger.info(f'[Eval] no improve {patience_cnt}/{patience}')
 
         torch.save({'epoch': epoch, 'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
-                    'history': history, 'best_f1': best_f1}, model_dir / 'last.pt')
+                    'history': history, 'best_f1': best_f1, 'patience_cnt': patience_cnt}, model_dir / 'last.pt')
 
         if patience_cnt >= patience:
             logger.info('[Stop] early stopping')

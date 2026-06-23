@@ -1,6 +1,6 @@
 # CLAUDE.md — PriFold 当前工作指南
 
-> 最近更新：2026-06-22 15:03。当前正在跑 v10（MARS unfreeze）on cuda0。
+> 最近更新：2026-06-23 13:06。v10 续训中（从 best.pt epoch 91 开始，小 LR 精调 60 epoch）on cuda0。
 
 ## 1. 项目状态
 
@@ -8,8 +8,8 @@ PriFold/SymFold 实验线位于 `symfold/`。当前主结论：
 
 | 版本 | Test F1 | 状态 | 说明 |
 |------|---------|------|------|
-| v9 | **0.6961** | ✅ 完成 | 当前最佳，MARS frozen + RoPE + shift margin + 强正则 |
-| v10 | — | 🏃 训练中 | v9 代码 + MARS 全部解冻，从 v9 warm-start，分层 LR |
+| v10 | **0.7207** | 🏃 续训中 | MARS 全部解冻，epoch 91→151，小 LR 精调 |
+| v9 | 0.6961 | ✅ 完成 | MARS frozen + RoPE + shift margin + 强正则 |
 | v7 | 0.6538 | ✅ 完成 | 纯判别式 DensityNet |
 | v8 | 0.6105 | ✅ 完成 | v8 改动不理想 |
 
@@ -23,17 +23,31 @@ docs/v9/v9_full_comprehensive_failure_analysis.md          # v9 全面分析 + v
 
 ## 2. 当前正在跑的实验
 
-### v10 — cuda0
+### v10 续训 — cuda0
 
 ```text
-目的: 验证 MARS 解冻是否能突破 v9 的表示瓶颈
+目的: MARS 解冻已有效（+2.5pp），小 LR 精调看能否进一步提升
 代码: symfold/v9/model.py (DensityNetProPlus, freeze_mars=false)
 训练脚本: symfold/train/train_v10.py
 配置: symfold/config/v10/v10_ddp.json
 日志: symfold/logs/v10_ddp/v10.log
 输出: symfold/outputs/v10_ddp/
-关键变量: freeze_mars=false, mars_lr=5e-6, head_lr=5e-4, 从 v9 best.pt warm-start
+续训参数: mars_lr=1e-6, head_lr=1e-4, 余弦退火 60 epoch, warmup 3
+当前状态: 从 best.pt (epoch 90) 续训，epoch 91→151
 ```
+
+**注意**：之前续训（epoch 96-105）因 LR 跳变退化已回滚，history 截断到 epoch 90。
+
+**v10 阶段性成果（epoch 0-95）：**
+
+| 指标 | 值 | 备注 |
+|------|-----|------|
+| Best Val F1 | **0.7214** | @ epoch 90 |
+| Best Test F1 | **0.7207** | @ epoch 79 |
+| vs v9 | **+2.5pp** | v9 test F1 = 0.6961 |
+| patience | 5/30 | 仍在爬升中 |
+
+Test F1 进展：e19=0.6759 → e39=0.6975 → e59=0.7125 → e79=0.7207
 
 查看日志：
 
@@ -97,6 +111,7 @@ export PYTHONPATH=/root/aigame/dannyyan/PriFold
 
 ## 8. 后续计划
 
-1. 等 v10 跑到 epoch 20，看 test F1 趋势
-2. 如果 MARS unfreeze 有效（test F1 > 0.70），继续跑满 100
-3. 如果无效或退化，考虑 LoRA/Adapter 替代全量 unfreeze
+1. ✅ v10 MARS unfreeze 已验证有效：test F1 0.6961 → 0.7207（+2.5pp）
+2. 🏃 续训到 150 epoch，看 F1 能否突破 0.73
+3. 如果趋势放缓，考虑：降 LR 精调 / 增大数据 / 调 sampling 阈值
+4. 续训完后用 best checkpoint 做完整 test report

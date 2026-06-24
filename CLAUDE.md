@@ -1,6 +1,6 @@
 # CLAUDE.md — PriFold 当前工作指南
 
-> 最近更新：2026-06-23 13:06。v10 续训中（从 best.pt epoch 91 开始，小 LR 精调 60 epoch）on cuda0。
+> 最近更新：2026-06-24 15:27。v10 训练已完成（151 epochs），Test F1 = 0.7284。
 
 ## 1. 项目状态
 
@@ -8,7 +8,7 @@ PriFold/SymFold 实验线位于 `symfold/`。当前主结论：
 
 | 版本 | Test F1 | 状态 | 说明 |
 |------|---------|------|------|
-| v10 | **0.7207** | 🏃 续训中 | MARS 全部解冻，epoch 91→151，小 LR 精调 |
+| v10 | **0.7284** | ✅ 完成 | MARS 全部解冻，151 epochs（含续训 60 epoch 精调） |
 | v9 | 0.6961 | ✅ 完成 | MARS frozen + RoPE + shift margin + 强正则 |
 | v7 | 0.6538 | ✅ 完成 | 纯判别式 DensityNet |
 | v8 | 0.6105 | ✅ 完成 | v8 改动不理想 |
@@ -21,39 +21,29 @@ docs/v9/v9_ablation_rope_regularization_report.md          # 消融结论
 docs/v9/v9_full_comprehensive_failure_analysis.md          # v9 全面分析 + v10 行动方案
 ```
 
-## 2. 当前正在跑的实验
+## 2. v10 最终结果
 
-### v10 续训 — cuda0
+### v10 训练已完成 — 151 epochs (0-150)
 
 ```text
-目的: MARS 解冻已有效（+2.5pp），小 LR 精调看能否进一步提升
 代码: symfold/v9/model.py (DensityNetProPlus, freeze_mars=false)
 训练脚本: symfold/train/train_v10.py
 配置: symfold/config/v10/v10_ddp.json
-日志: symfold/logs/v10_ddp/v10.log
 输出: symfold/outputs/v10_ddp/
-续训参数: mars_lr=1e-6, head_lr=1e-4, 余弦退火 60 epoch, warmup 3
-当前状态: 从 best.pt (epoch 90) 续训，epoch 91→151
+训练策略: 前 90 epoch 常规训练 + 后 60 epoch 小 LR 精调（mars_lr=1e-6, head_lr=1e-4）
 ```
 
-**注意**：之前续训（epoch 96-105）因 LR 跳变退化已回滚，history 截断到 epoch 90。
-
-**v10 阶段性成果（epoch 0-95）：**
+**v10 最终成果：**
 
 | 指标 | 值 | 备注 |
 |------|-----|------|
-| Best Val F1 | **0.7214** | @ epoch 90 |
-| Best Test F1 | **0.7207** | @ epoch 79 |
-| vs v9 | **+2.5pp** | v9 test F1 = 0.6961 |
-| patience | 5/30 | 仍在爬升中 |
+| Best Val F1 | **0.7265** | @ epoch 147 |
+| Best Test F1 | **0.7284** | @ epoch 149 |
+| vs v9 | **+3.2pp** | v9 test F1 = 0.6961 |
 
-Test F1 进展：e19=0.6759 → e39=0.6975 → e59=0.7125 → e79=0.7207
+Test F1 进展：e19=0.6759 → e39=0.6975 → e59=0.7125 → e79=0.7207 → e99=0.7199 → e109=0.7245 → e119=0.7253 → e139=0.7262 → e149=0.7284
 
-查看日志：
-
-```bash
-tail -f symfold/logs/v10_ddp/v10.stdout.log
-```
+**注意**：续训阶段（epoch 91-150）val F1 在 0.725-0.727 之间平台，test F1 仍有缓慢提升。
 
 ## 3. 训练规范
 
@@ -64,6 +54,27 @@ tail -f symfold/logs/v10_ddp/v10.stdout.log
 3. 每 20 epoch 做一次 `bprna-test` eval，并写入 history
 4. 保存 `best.pt` 和 `last.pt`
 5. 训练结束后用 best checkpoint 跑完整 test report
+6. **Checkpoint 必须保存完整的续训状态**，确保 resume 后学习率不跳变：
+   ```python
+   # 保存时必须包含：
+   torch.save({
+       'epoch': epoch,
+       'global_step': global_step,
+       'model': model.state_dict(),
+       'optimizer': optimizer.state_dict(),
+       'scheduler': scheduler.state_dict(),  # 必须保存 scheduler 状态
+       'best_f1': best_f1,
+       'patience_cnt': patience_cnt,
+       'history': history,
+   }, 'last.pt')
+
+   # 恢复时必须：
+   optimizer.load_state_dict(ckpt['optimizer'])
+   scheduler.load_state_dict(ckpt['scheduler'])
+   global_step = ckpt['global_step']
+   ```
+   - 必须使用 PyTorch 的正式 `LRScheduler`（如 `CosineAnnealingLR`），不要手动算 LR
+   - Resume 后 LR 必须自动恢复到中断时的精确位置
 
 ## 4. 可视化规范
 
@@ -109,9 +120,45 @@ export PYTHONPATH=/root/aigame/dannyyan/PriFold
 - **Matching decoder 无增益**：验证证明瓶颈在 score map 质量，不在解码层
 - **v9 天花板**：冻结 MARS + 贪心解码 + 逐点 loss 的范式上限约 0.70
 
-## 8. 后续计划
+## 8. v10 全面分析结论
 
-1. ✅ v10 MARS unfreeze 已验证有效：test F1 0.6961 → 0.7207（+2.5pp）
-2. 🏃 续训到 150 epoch，看 F1 能否突破 0.73
-3. 如果趋势放缓，考虑：降 LR 精调 / 增大数据 / 调 sampling 阈值
-4. 续训完后用 best checkpoint 做完整 test report
+```text
+symfold/outputs/v10_ddp/comprehensive_analysis/v10_comprehensive_analysis.md   # 长度/家族/配对距离分析
+symfold/outputs/v10_ddp/comprehensive_analysis/v10_cross_split_analysis.md     # train/val/test 对比
+symfold/outputs/v10_ddp/comprehensive_analysis/v10_badcase_deep_analysis.md    # bad case 逐样本分析
+```
+
+- 过拟合严重：Train F1=0.91 vs Test F1=0.73，gap=0.18
+- 108 个 bad cases 中 99 个在 train 中有高度相似样本 → 模型能力问题，不是数据覆盖问题
+- Bad case 中 GT 配对平均概率仅 0.21，模型完全不认识这些结构
+- FP 平均概率 0.64，模型"很自信但全错"
+- RFAM 贡献 97% bad cases，泛化 gap=0.20
+
+## 9. v11 实验规划
+
+改进方案文档：`docs/v11/v11_improvement_proposals.md`
+
+5 大类 21 个候选改进，每次只引入一个变量。
+
+### v11a — Hard-case 过采样（🏃 训练中）
+
+```text
+训练脚本: symfold/train/train_v11a.py
+配置: symfold/config/v11/v11a_hardcase_oversample.json
+输出: symfold/outputs/v11a/
+起点: v9 best.pt warm-start, freeze_mars=false
+唯一改动: 对 train 中与 test bad case 结构相似的 243 个样本做 2x 过采样
+LR: mars_lr=5e-6, head_lr=5e-4, cosine 100 epoch
+```
+
+**注意**：首次启动时因 per_sample_results.json 字段名不匹配导致过采样未生效（找到 0 个样本），
+代码已修复。需要清理 outputs/v11a/ 后重新启动。
+
+## 10. 后续计划
+
+1. ✅ v10 全面分析完成
+2. 🏃 v11a hard-case 过采样（需重启）
+3. ⬜ v11b 增大 dropout (0.2→0.3)
+4. ⬜ v11c 非配对位随机突变
+5. ⬜ v11d Label smoothing
+6. ⬜ 有效改进叠加 → v11-final

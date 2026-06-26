@@ -1,58 +1,57 @@
-# CLAUDE.md — PriFold 当前工作指南
+# CLAUDE.md — PriFold 工作指南
 
-> 最近更新：2026-06-24 15:27。v10 训练已完成（151 epochs），Test F1 = 0.7284。
+> 本文件是 AI 协作的长期工作规范，只记录**稳定的规则与约定**，不记录时效性的实验进度。
+> 具体实验结论、报告、分析一律写入 `docs/`。
 
-## 1. 项目状态
+## 0. 科研严谨性铁律（最高优先级，AI 必须遵守）
 
-PriFold/SymFold 实验线位于 `symfold/`。当前主结论：
+**AI 不允许图省事、偷懒、走捷径。** 以下行为严格禁止：
 
-| 版本 | Test F1 | 状态 | 说明 |
-|------|---------|------|------|
-| v10 | **0.7284** | ✅ 完成 | MARS 全部解冻，151 epochs（含续训 60 epoch 精调） |
-| v9 | 0.6961 | ✅ 完成 | MARS frozen + RoPE + shift margin + 强正则 |
-| v7 | 0.6538 | ✅ 完成 | 纯判别式 DensityNet |
-| v8 | 0.6105 | ✅ 完成 | v8 改动不理想 |
+1. **禁止擅自采样/缩减数据集**：评估和分析必须用**全量数据**。
+   - 例如对比 train/val/test 时，train 集所有样本必须全部评估，不允许采样子集"加速"。
+   - 若确实因算力受限需要采样，必须**先明确征求用户同意**，并在报告显著位置标注。
 
-重要报告：
+2. **禁止擅自修改训练数据**：
+   - 不允许通过缩小 `max_len_filter` 来规避 OOM（这会丢弃长序列样本）。
+   - 显存问题必须从工程侧解决（gradient checkpointing、动态 batch、减小 batch_size 等），不能砍数据。
 
-```text
-docs/v9/v9_test_evaluation_report.md                       # v9 测试报告
-docs/v9/v9_ablation_rope_regularization_report.md          # 消融结论
-docs/v9/v9_full_comprehensive_failure_analysis.md          # v9 全面分析 + v10 行动方案
-```
+3. **禁止伪造或估算代替实测**：
+   - 显存占用、性能指标等必须实测，不能用理论估算冒充实测结果。
+   - 理论估算与实测必须分别标注清楚。
 
-## 2. v10 最终结果
+4. **禁止用部分结果代替完整结果**：
+   - 跑实验要跑完整流程，不能只跑几个 epoch 就下结论。
+   - 报告必须基于真实完整的运行数据。
 
-### v10 训练已完成 — 151 epochs (0-150)
+5. **诚实标注局限**：任何因客观限制而做的简化，必须在产出物中显式说明，不得隐瞒。
 
-```text
-代码: symfold/v9/model.py (DensityNetProPlus, freeze_mars=false)
-训练脚本: symfold/train/train_v10.py
-配置: symfold/config/v10/v10_ddp.json
-输出: symfold/outputs/v10_ddp/
-训练策略: 前 90 epoch 常规训练 + 后 60 epoch 小 LR 精调（mars_lr=1e-6, head_lr=1e-4）
-```
+违反以上铁律等同于科研不端。宁可慢，不可假。
 
-**v10 最终成果：**
+## 1. 目录组织规范（AI 产出文件时必须遵守）
 
-| 指标 | 值 | 备注 |
-|------|-----|------|
-| Best Val F1 | **0.7265** | @ epoch 147 |
-| Best Test F1 | **0.7284** | @ epoch 149 |
-| vs v9 | **+3.2pp** | v9 test F1 = 0.6961 |
+所有产出物按**类型**归位，并在各自目录下**按版本分开**（如 `v10`、`v11`、`v12`）：
 
-Test F1 进展：e19=0.6759 → e39=0.6975 → e59=0.7125 → e79=0.7207 → e99=0.7199 → e109=0.7245 → e119=0.7253 → e139=0.7262 → e149=0.7284
+| 类型 | 位置 | 说明 |
+|------|------|------|
+| **文档 / 报告 / 分析** | `docs/<version>/` | 所有 `.md` 文档、实验报告、分析结论、改进方案 |
+| **模型 / history / 可视化** | `symfold/outputs/<version>/` | checkpoint（`best.pt` / `last.pt`）、`history.json`、`training_curves.png` 及其他可视化图 |
+| **日志** | `symfold/logs/<version>/` | 训练/评估的运行日志（`.log`） |
 
-**注意**：续训阶段（epoch 91-150）val F1 在 0.725-0.727 之间平台，test F1 仍有缓慢提升。
+规则：
 
-## 3. 训练规范
+1. **写文档一律放到 `docs/` 下**，并放进对应版本子目录（如 `docs/v11/`）；禁止把报告散落在 `outputs/` 或项目根目录。
+2. **`outputs/<version>/` 只放模型产物与可视化**：checkpoint、history、图片。checkpoint 只保留 `best.pt` 和 `last.pt`，不保留中间 `epoch_*.pt`。
+3. **`logs/<version>/` 只放日志**。
+4. 三类目录都必须**按版本命名分开**，不同版本互不混放。
+
+## 2. 训练规范
 
 以后所有训练必须满足：
 
 1. 每个 epoch 保存 `history.json`
 2. 每个 epoch 绘制 `training_curves.png`
 3. 每 20 epoch 做一次 `bprna-test` eval，并写入 history
-4. 保存 `best.pt` 和 `last.pt`
+4. 保存 `best.pt` 和 `last.pt`（不保留中间 epoch checkpoint）
 5. 训练结束后用 best checkpoint 跑完整 test report
 6. **Checkpoint 必须保存完整的续训状态**，确保 resume 后学习率不跳变：
    ```python
@@ -76,7 +75,7 @@ Test F1 进展：e19=0.6759 → e39=0.6975 → e59=0.7125 → e79=0.7207 → e99
    - 必须使用 PyTorch 的正式 `LRScheduler`（如 `CosineAnnealingLR`），不要手动算 LR
    - Resume 后 LR 必须自动恢复到中断时的精确位置
 
-## 4. 可视化规范
+## 3. 可视化规范
 
 所有 `training_curves.png` 必须参考 v8 的格式，包含 **6 个子图**（3×2 布局）：
 
@@ -87,24 +86,9 @@ Test F1 进展：e19=0.6759 → e39=0.6975 → e59=0.7125 → e79=0.7207 → e99
 5. **Test F1 (periodic eval)** — 每 20 epoch 的 test F1
 6. **Test MCC (periodic eval)** — 每 20 epoch 的 test MCC
 
-越多指标越好。参考文件：`symfold/outputs/v8_full/training_curves.png`
+越多指标越好。参考文件：`symfold/outputs/archive/v8_full/training_curves.png`
 
-## 5. v10 的设计
-
-v10 和 v9 使用**完全相同的模型代码**（`symfold/v9/model.py`）。
-
-唯一区别：`freeze_mars=false`，MARS 160M 参数全部可训练。
-
-| | v9 | v10 |
-|---|---|---|
-| freeze_mars | true | **false** |
-| 可训参数 | 5.09M | **165.7M** |
-| MARS LR | — | 5e-6 |
-| Head LR | 5e-4 | 5e-4 |
-| 初始化 | 从头训 | 从 v9 best.pt warm-start |
-| grad_clip | 1.0 | 0.5（保护 MARS） |
-
-## 6. 环境
+## 4. 环境
 
 ```bash
 cd /root/aigame/dannyyan/PriFold
@@ -113,52 +97,35 @@ source activate RNADiffFold_torch260
 export PYTHONPATH=/root/aigame/dannyyan/PriFold
 ```
 
-## 7. 消融结论（已完成）
+## 5. 主要训练版本概况
 
-- **RoPE 是 v9 最关键因素**：关闭后 Test F1 从 0.6961 降到 0.5770（-11.9pp）
-- **增强正则化有效但次要**：低正则 Test F1 0.6804（-1.6pp）
-- **Matching decoder 无增益**：验证证明瓶颈在 score map 质量，不在解码层
-- **v9 天花板**：冻结 MARS + 贪心解码 + 逐点 loss 的范式上限约 0.70
+实验线位于 `symfold/`。当前主要版本（指标均为 bpRNA-test 全量实测，F1 越高越好）：
 
-## 8. v10 全面分析结论
+| 版本 | 训练范式 | Best Val F1 | Test F1 | epochs | 关键设计 |
+|------|---------|-------------|---------|--------|---------|
+| **v11** | 监督判别式（v10 基础） | 0.7256 @94 | **0.7290** @89 | 100 | 在 v9 基础上放开 MARS 权重 + 对 test bad-case 相似样本 2x 过采样 |
+| **v10** | 监督判别式（Focal BCE + Dice） | 0.7265 @147 | 0.7284 @149 | 151 | MARS 160M **全部解冻**微调，全分辨率 Axial Attention |
+| **v9** | 监督判别式 | 0.6814 @160 | 0.6961 | 183 | MARS **冻结** + RoPE + 强正则（v10 的起点） |
+| **v6** | 离散 Flow Matching（CTMC） | 0.6059 @213 | 0.6083 @189 | 217 | Patch 下采样 4× + Dilated Axial Attention，生成式 |
 
-```text
-symfold/outputs/v10_ddp/comprehensive_analysis/v10_comprehensive_analysis.md   # 长度/家族/配对距离分析
-symfold/outputs/v10_ddp/comprehensive_analysis/v10_cross_split_analysis.md     # train/val/test 对比
-symfold/outputs/v10_ddp/comprehensive_analysis/v10_badcase_deep_analysis.md    # bad case 逐样本分析
-```
+要点：
 
-- 过拟合严重：Train F1=0.91 vs Test F1=0.73，gap=0.18
-- 108 个 bad cases 中 99 个在 train 中有高度相似样本 → 模型能力问题，不是数据覆盖问题
-- Bad case 中 GT 配对平均概率仅 0.21，模型完全不认识这些结构
-- FP 平均概率 0.64，模型"很自信但全错"
-- RFAM 贡献 97% bad cases，泛化 gap=0.20
+- **v10/v11 是当前最强**，判别式范式，Test F1 ≈ 0.73；v11 凭 hard-case 过采样小幅超越 v10。
+- **v12 是 Flow Matching 新范式代码**（生成式，独立于判别式主线），代码在 `symfold/v12/`，尚未正式训练。
+- **v9 → v10 的关键变化**：解冻 MARS（可训参数 5M → 165.7M），从 v9 best.pt warm-start，Test F1 +3.2pp。
+- **v6 是生成式（Flow Matching）路线**，效率高（patch 下采样使 attention 显存降 ~64×）但精度落后判别式约 12pp。
+- 范式与显存/速度的详细对比见 `docs/training_comparison_v6_v10_v12.md`。
 
-## 9. v11 实验规划
+## 6. 实验结论入口
 
-改进方案文档：`docs/v11/v11_improvement_proposals.md`
-
-5 大类 21 个候选改进，每次只引入一个变量。
-
-### v11a — Hard-case 过采样（🏃 训练中）
+各版本的详细结论、报告与分析见 `docs/<version>/`，例如：
 
 ```text
-训练脚本: symfold/train/train_v11a.py
-配置: symfold/config/v11/v11a_hardcase_oversample.json
-输出: symfold/outputs/v11a/
-起点: v9 best.pt warm-start, freeze_mars=false
-唯一改动: 对 train 中与 test bad case 结构相似的 243 个样本做 2x 过采样
-LR: mars_lr=5e-6, head_lr=5e-4, cosine 100 epoch
+docs/v9/          # v9 测试报告、消融结论、失败分析
+docs/v10/         # v10 报告与全面分析
+docs/v11/         # v11 改进方案与各子实验
+docs/archive/     # 历史版本 (v6/v7/v8 等) 已归档于此
 ```
 
-**注意**：首次启动时因 per_sample_results.json 字段名不匹配导致过采样未生效（找到 0 个样本），
-代码已修复。需要清理 outputs/v11a/ 后重新启动。
-
-## 10. 后续计划
-
-1. ✅ v10 全面分析完成
-2. 🏃 v11a hard-case 过采样（需重启）
-3. ⬜ v11b 增大 dropout (0.2→0.3)
-4. ⬜ v11c 非配对位随机突变
-5. ⬜ v11d Label smoothing
-6. ⬜ 有效改进叠加 → v11-final
+> 各版本的指标进展、逐 epoch 数字等以 `docs/` 中的最新报告为准，本文件只保留概况。
+> 历史版本的代码 / 输出 / 日志 / 文档分别归档在 `symfold/archive/`、`symfold/outputs/archive/`、`symfold/logs/archive/`、`docs/archive/`。

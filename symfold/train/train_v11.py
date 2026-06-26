@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""PriFold v11a: v10 baseline + hard-case oversampling.
+"""PriFold v11: v10 baseline + hard-case oversampling.
 
 与 v10 唯一的区别：对训练集中与 test bad case 结构相似的样本做 2x 过采样。
 从 v9 best.pt warm-start，MARS 解冻。
 
 Usage:
-  CUDA_VISIBLE_DEVICES=0 python symfold/train/train_v11a.py symfold/config/v11/v11a_hardcase_oversample.json
+  CUDA_VISIBLE_DEVICES=0 python symfold/train/train_v11.py symfold/config/v11/v11_hardcase_oversample.json
 """
 from __future__ import annotations
 
@@ -262,11 +262,17 @@ def build_param_groups(model, head_lr, mars_lr, weight_decay):
     return groups, n_mars, n_head
 
 
-def lr_schedule(epoch, warmup, total):
-    if epoch < warmup:
-        return (epoch + 1) / warmup
-    progress = (epoch - warmup) / max(total - warmup, 1)
-    return 0.5 * (1.0 + math.cos(math.pi * progress))
+def build_scheduler(optimizer, warmup_epochs, total_epochs):
+    """Warmup + Cosine via LambdaLR — exactly matches the original manual schedule."""
+    from torch.optim.lr_scheduler import LambdaLR
+
+    def lr_lambda(epoch):
+        if epoch < warmup_epochs:
+            return (epoch + 1) / warmup_epochs
+        progress = (epoch - warmup_epochs) / max(total_epochs - warmup_epochs, 1)
+        return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    return LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 
 def train_one_epoch(model, loader, optimizer, device, config, logger, epoch):
@@ -435,8 +441,8 @@ def main():
 
     logging.basicConfig(level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(message)s',
-        handlers=[logging.FileHandler(log_dir / 'v11a.log', mode='a'), logging.StreamHandler()])
-    logger = logging.getLogger('v11a')
+        handlers=[logging.FileHandler(log_dir / 'v11.log', mode='a'), logging.StreamHandler()])
+    logger = logging.getLogger('v11')
     logger.info(f'Config: {json.dumps(config, indent=2)}')
 
     # LM
@@ -489,6 +495,11 @@ def main():
         num_workers=tcfg.get('num_workers', 4), pin_memory=True)
     val_loader = DataLoader(val_ds, batch_size=1, shuffle=False, collate_fn=collate, num_workers=4)
 
+    # Scheduler
+    n_epochs = tcfg.get('epochs', 100)
+    warmup = tcfg.get('warmup_epochs', 10)
+    scheduler = build_scheduler(optimizer, warmup, n_epochs)
+
     # Resume
     history = []
     best_f1 = 0.0
@@ -504,32 +515,26 @@ def main():
         ckpt = torch.load(last_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt['model'])
         optimizer.load_state_dict(ckpt['optimizer'])
+        if 'scheduler' in ckpt:
+            scheduler.load_state_dict(ckpt['scheduler'])
+        else:
+            # Old checkpoint without scheduler: step scheduler to correct position
+            for _ in range(ckpt.get('epoch', -1) + 1):
+                scheduler.step()
         best_f1 = ckpt.get('best_f1', 0.0)
         start_epoch = ckpt.get('epoch', -1) + 1
         patience_cnt = ckpt.get('patience_cnt', 0)
         logger.info(f'[Resume] epoch={start_epoch} best_f1={best_f1:.4f}')
 
-    # Train
-    n_epochs = tcfg.get('epochs', 100)
-    end_epoch = start_epoch + n_epochs
-    warmup = tcfg.get('warmup_epochs', 10)
     patience = tcfg.get('patience', 30)
     test_every = tcfg.get('test_eval_every', 10)
 
-    base_lrs = [mars_lr, head_lr]
-    for i, g in enumerate(optimizer.param_groups):
-        g['_base_lr'] = base_lrs[i]
+    logger.info(f'[Train] start_epoch={start_epoch} end_epoch={n_epochs}')
 
-    logger.info(f'[Train] start_epoch={start_epoch} end_epoch={end_epoch} n_epochs={n_epochs}')
-
-    for epoch in range(start_epoch, end_epoch):
+    for epoch in range(start_epoch, n_epochs):
         train_sampler.set_epoch(epoch)
-        local_epoch = epoch - start_epoch
-        mult = lr_schedule(local_epoch, warmup, n_epochs)
-        for g in optimizer.param_groups:
-            g['lr'] = g['_base_lr'] * mult
-        logger.info(f'[LR] e{epoch} mult={mult:.4f} mars_lr={optimizer.param_groups[0]["lr"]:.2e} '
-                    f'head_lr={optimizer.param_groups[1]["lr"]:.2e}')
+        cur_lrs = [g['lr'] for g in optimizer.param_groups]
+        logger.info(f'[LR] e{epoch} mars_lr={cur_lrs[0]:.2e} head_lr={cur_lrs[1]:.2e}')
 
         train_avg = train_one_epoch(model, train_loader, optimizer, device, config, logger, epoch)
         val_res = evaluate(model, val_loader, device, config)
@@ -569,8 +574,12 @@ def main():
             patience_cnt += 1
             logger.info(f'[Eval] no improve {patience_cnt}/{patience}')
 
+        scheduler.step()
+
         torch.save({'epoch': epoch, 'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
-                    'history': history, 'best_f1': best_f1, 'patience_cnt': patience_cnt}, model_dir / 'last.pt')
+                    'scheduler': scheduler.state_dict(),
+                    'history': history, 'best_f1': best_f1, 'patience_cnt': patience_cnt},
+                   model_dir / 'last.pt')
 
         if patience_cnt >= patience:
             logger.info('[Stop] early stopping')

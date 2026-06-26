@@ -1,0 +1,71 @@
+{
+  "project_name": "prifold_symflow",
+  "task_name": "v12_gen_discrete_flow",
+  "device": "cuda:0",
+  "seed": 3407,
+
+  "paths": {
+    "data_dir": "/root/aigame/dannyyan/PriFold/data",
+    "pretrained_lm_dir": "/root/aigame/dannyyan/PriFold/model",
+    "log_dir": "/root/aigame/dannyyan/PriFold/symfold/logs/v12",
+    "output_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v12",
+    "model_save_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v12/model"
+  },
+
+  "model": {
+    "freeze_mars": true,
+    "mars_dim": 1056,
+    "mars_n_attn_layers": 6,
+    "mars_n_heads": 12,
+    "mars_hidden_layer_indices": [3, 6, 9, 12],
+    "hidden_dim": 256,
+    "num_heads": 8,
+    "dim_head": 32,
+    "num_layers": 8,
+    "ff_mult": 4,
+    "dropout": 0.2,
+    "drop_path": 0.15,
+    "use_rope": true,
+    "use_seq_oh": true,
+    "max_len": 512,
+    "use_gradient_checkpoint": false,
+    "rho_0": 0.005
+  },
+
+  "loss": {
+    "bce": {"enabled": true, "pos_weight_base": 99.0, "pos_weight_min": 10.0, "focal_gamma": 1.0, "time_weight": true},
+    "dice": {"enabled": true, "weight": 0.5, "smooth": 1.0},
+    "tversky": {"enabled": false, "weight": 0.5, "alpha": 0.3, "beta": 0.7, "smooth": 1.0},
+    "pair_count": {"enabled": true, "weight": 0.3},
+    "ratio_penalty": {"enabled": true, "weight": 0.2, "threshold": 1.2},
+    "density": {"enabled": false, "weight": 0.2},
+    "direct": {"enabled": false, "weight": 0.4},
+    "stacking": {"enabled": true, "weight": 0.05},
+    "non_crossing": {"enabled": true, "weight": 0.03},
+    "label_smoothing": {"enabled": false, "epsilon": 0.01}
+  },
+
+  "training": {
+    "dataset_mode": "bprna",
+    "batch_size": 8,
+    "gradient_accumulation_steps": 1,
+    "lr": 3e-4,
+    "weight_decay": 0.01,
+    "epochs": 100,
+    "warmup_epochs": 5,
+    "patience": 30,
+    "grad_clip": 1.0,
+    "amp_dtype": "bf16",
+    "max_len_filter": 490,
+    "num_workers": 4,
+    "pin_memory": true,
+    "test_eval_every": 10,
+    "test_stages": ["bprna-test"]
+  },
+
+  "sampling": {
+    "num_steps": 20,
+    "eval_num_steps": 20,
+    "threshold": 0.5
+  }
+}

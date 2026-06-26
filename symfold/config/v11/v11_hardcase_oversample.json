@@ -1,15 +1,15 @@
 {
   "project_name": "prifold_symflow",
-  "task_name": "v11a_hardcase_oversample",
+  "task_name": "v11_hardcase_oversample",
   "device": "cuda:0",
   "seed": 3407,
 
   "paths": {
     "data_dir": "/root/aigame/dannyyan/PriFold/data",
     "pretrained_lm_dir": "/root/aigame/dannyyan/PriFold/model",
-    "log_dir": "/root/aigame/dannyyan/PriFold/symfold/logs/v11a",
-    "output_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v11a",
-    "model_save_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v11a/model"
+    "log_dir": "/root/aigame/dannyyan/PriFold/symfold/logs/v11",
+    "output_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v11",
+    "model_save_dir": "/root/aigame/dannyyan/PriFold/symfold/outputs/v11/model"
   },
 
   "model": {

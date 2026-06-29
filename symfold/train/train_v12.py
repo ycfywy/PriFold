@@ -19,6 +19,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.checkpoint
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -51,9 +52,15 @@ def build_model(cfg, extractor):
         dropout=mcfg.get('dropout', 0.2),
         drop_path=mcfg.get('drop_path', 0.15),
         use_rope=mcfg.get('use_rope', True),
-        use_seq_oh=mcfg.get('use_seq_oh', True),
         max_len=mcfg.get('max_len', 512),
         use_gradient_checkpoint=mcfg.get('use_gradient_checkpoint', False),
+        patch_size=mcfg.get('patch_size', 4),
+        refine_mid_ch=mcfg.get('refine_mid_ch', 16),
+        # Dual-track (single + pair)
+        single_dim=mcfg.get('single_dim', 128),
+        single_heads=mcfg.get('single_heads', 4),
+        single_dim_head=mcfg.get('single_dim_head', 32),
+        opm_hidden=mcfg.get('opm_hidden', 16),
         # Discrete flow
         rho_0=mcfg.get('rho_0', 0.005),
         loss_config=cfg.get('loss', None),
@@ -208,7 +215,7 @@ def plot_curves(history, output_dir):
         plt.savefig(Path(output_dir) / 'training_curves.png', dpi=120)
         plt.close()
     except Exception as e:
-        pass
+        print(f'[Plot] failed: {e}', file=sys.stderr)
 
 
 def main():
@@ -261,7 +268,12 @@ def main():
     max_len = tcfg.get('max_len_filter', 490)
     train_recs = build_records(data_dir, f'{tcfg["dataset_mode"]}-train', max_len=max_len)
     val_recs = build_records(data_dir, f'{tcfg["dataset_mode"]}-val', max_len=max_len)
-    train_ds = PriFoldSymFlowDataset(train_recs, augment=False)
+    aug_cfg = tcfg.get('augmentation', {})
+    train_ds = PriFoldSymFlowDataset(
+        train_recs,
+        augment=aug_cfg.get('enabled', False),
+        select=aug_cfg.get('select', 0.20),
+        replace=aug_cfg.get('replace', 0.40))
     val_ds = PriFoldSymFlowDataset(val_recs, augment=False)
     collate = make_collate_fn(tokenizer)
 
@@ -291,6 +303,7 @@ def main():
     best_f1 = 0.0
     patience_cnt = 0
     start_epoch = 0
+    global_step = 0
     history_path = output_dir / 'history.json'
 
     if history_path.exists():
@@ -307,6 +320,7 @@ def main():
         best_f1 = ckpt.get('best_f1', 0.0)
         start_epoch = ckpt.get('epoch', -1) + 1
         patience_cnt = ckpt.get('patience_cnt', 0)
+        global_step = ckpt.get('global_step', 0)
         logger.info(f'[Resume] epoch={start_epoch} best_f1={best_f1:.4f}')
 
     patience = tcfg.get('patience', 30)
@@ -365,8 +379,10 @@ def main():
 
         scheduler.step()
 
-        # Save last
-        torch.save({'epoch': epoch, 'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
+        # Save last — full resume state (optimizer-step count)
+        global_step += math.ceil(len(train_loader) / tcfg.get('gradient_accumulation_steps', 1))
+        torch.save({'epoch': epoch, 'global_step': global_step,
+                    'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
                     'scheduler': scheduler.state_dict(),
                     'history': history, 'best_f1': best_f1, 'patience_cnt': patience_cnt},
                    model_dir / 'last.pt')

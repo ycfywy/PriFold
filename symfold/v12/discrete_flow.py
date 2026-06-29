@@ -90,7 +90,11 @@ class NonCrossingLoss(nn.Module):
     def forward(self, logit, contact_masks):
         if self.weight == 0:
             return torch.tensor(0.0, device=logit.device)
-        prob = torch.sigmoid(logit) * contact_masks
+        L = logit.shape[-1]
+        idx = torch.arange(L, device=logit.device)
+        valid = ((idx.view(L, 1) - idx.view(1, L)).abs() >= 3).view(1, 1, L, L).float()
+        valid = valid * contact_masks
+        prob = torch.sigmoid(logit) * valid
         row_sum = prob.squeeze(1).sum(dim=-1)
         excess = F.relu(row_sum - 1.0)
         loss = excess.mean()
@@ -103,17 +107,32 @@ class NonCrossingLoss(nn.Module):
 
 def project_to_valid_contact_map(x: torch.Tensor, score: torch.Tensor,
                                   contact_masks: torch.Tensor,
-                                  max_iters: int = None) -> torch.Tensor:
-    """GPU greedy max-matching: symmetric + |i-j|>=3 + max 1 per row."""
-    B, _, L, _ = x.shape
-    device = x.device
+                                  max_iters: int = None,
+                                  min_score: float = 0.0,
+                                  use_sample_mask: bool = False) -> torch.Tensor:
+    """GPU greedy max-matching: symmetric + |i-j|>=3 + max 1 per row.
+
+    Args:
+        x: final sampled candidate map, used only when use_sample_mask=True.
+        score: model probability/score map.
+        min_score: minimum score threshold; entries below this are excluded.
+        use_sample_mask: if True, restrict candidates to sampled x=1 positions.
+            Default False is score-based projection, which is less noisy and makes
+            threshold meaningful.
+    """
+    B, _, L, _ = score.shape
+    device = score.device
     if max_iters is None:
         max_iters = L // 2
 
     idx = torch.arange(L, device=device)
     valid = ((idx.view(L, 1) - idx.view(1, L)).abs() >= 3).view(1, 1, L, L).float()
     valid = valid * contact_masks
-    s = (x * (score + 1e-6)) * valid
+    s = score * valid
+    if use_sample_mask:
+        s = s * x
+    if min_score > 0:
+        s = torch.where(s >= min_score, s, torch.zeros_like(s))
     s = 0.5 * (s + s.transpose(-2, -1))
 
     out = torch.zeros_like(x)

@@ -26,7 +26,12 @@
     "dropout": 0.2,
     "drop_path": 0.15,
     "use_rope": true,
-    "use_seq_oh": true,
+    "patch_size": 4,
+    "refine_mid_ch": 16,
+    "single_dim": 128,
+    "single_heads": 4,
+    "single_dim_head": 32,
+    "opm_hidden": 16,
     "max_len": 512,
     "use_gradient_checkpoint": false,
     "rho_0": 0.005
@@ -57,15 +62,16 @@
     "grad_clip": 1.0,
     "amp_dtype": "bf16",
     "max_len_filter": 490,
+    "augmentation": {"enabled": true, "select": 0.20, "replace": 0.40},
     "num_workers": 4,
     "pin_memory": true,
-    "test_eval_every": 10,
+    "test_eval_every": 20,
     "test_stages": ["bprna-test"]
   },
 
   "sampling": {
     "num_steps": 20,
-    "eval_num_steps": 20,
+    "eval_num_steps": 8,
     "threshold": 0.5
   }
 }

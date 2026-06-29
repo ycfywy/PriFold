@@ -1,169 +1,146 @@
-# v12: Flow Matching + DiT for RNA Secondary Structure Prediction
+# v12: Discrete Flow Matching + FlowDiT for RNA Secondary Structure
 
 ## 一句话
 
-用 **Conditional Flow Matching** 学习从高斯噪声到 RNA contact map 的连续流，**DiT (Diffusion Transformer)** 作为骨干网络预测流场。
+v12 是一个**生成式 RNA 二级结构预测模型**：用 **离散 Bernoulli Flow Matching / CTMC tau-leap** 生成 contact map，用 **FlowDiT（DiT + axial attention + RoPE2D）** 作为 backbone。
 
 ---
 
-## 核心思想
+## 1. 当前真实范式
 
+v12 当前实现是 **Discrete Flow Matching**，不是 continuous OT flow。
+
+训练时：
+
+```text
+x_1 = GT contact map ∈ {0,1}^{L×L}
+t ~ Uniform(0,1)
+x_t ~ Bernoulli(t · x_1 + (1-t) · ρ_0)
+model predicts logit p(x_1=1 | x_t, t, RNA)
+loss = Focal BCE + Dice + PairCount + RatioPenalty + Stacking + NonCrossing
 ```
-噪声 x₀ ~ N(0,1)  ───── Flow Field v_θ ─────→  Contact Map x₁
-     (L×L)              (DiT predicts)              (L×L binary)
-```
 
-**训练**：给定 GT contact map x₁，随机采样 t∈[0,1]，构造插值 x_t = (1-t)·x₀ + t·x₁，让 DiT 学会预测 x₁（或速度 v = x₁ - x₀）。
+推理时：
 
-**推理**：从 x₀ ~ N(0,1) 出发，用 Euler 积分沿着学到的流走 N 步到达 x₁，sigmoid 后阈值化得到二值 contact map。
-
----
-
-## 架构
-
-```
-RNA Sequence
-    │
-    ▼
-┌────────────────────────────┐
-│  MARS-LX (160M, Encoder)   │  ← 预训练 RNA 语言模型
-│  → hidden (B, L, 1056)     │
-│  → attention (B, 6, 12, L, L) │
-└────────────┬───────────────┘
-             │
-             ▼
-┌────────────────────────────┐
-│  MARSConditioner            │  ← 投影为 pair 表征
-│  → pair_cond (B, L, L, C)  │
-└────────────┬───────────────┘
-             │
-    x_t ─────┤   t ──┐
-             │       │
-             ▼       ▼
-┌────────────────────────────┐
-│  Input Proj: [x_t; cond]→D │
-│                            │
-│  ┌──────────────────────┐  │
-│  │  DiT Block × N       │  │
-│  │  ┌────────────────┐  │  │
-│  │  │ AdaLN-Zero(t)  │  │  │  ← time conditioning
-│  │  │ Row Attention   │  │  │
-│  │  │ Col Attention   │  │  │
-│  │  │ FFN             │  │  │
-│  │  └────────────────┘  │  │
-│  └──────────────────────┘  │
-│                            │
-│  Final AdaLN + Linear → 1  │
-│  Symmetrize                │
-└────────────┬───────────────┘
-             │
-             ▼
-        pred (B, L, L)
-        = predicted x₁ or velocity
+```text
+x_0 ~ Bernoulli(ρ_0)
+for step in tau-leap schedule:
+    p_x1 = model(x_t, t, RNA)
+    rate_01, rate_10 = CTMC rates
+    x_t = stochastic flip(x_t, rates)
+final = score-based greedy projection(p_x1, threshold)
 ```
 
 ---
 
-## 为什么是 Flow Matching + DiT？
+## 2. 架构（双轨 single + pair，类 Evoformer）
 
-### vs 判别式 (v9/v10)
+```text
+RNA sequence
+    → MARS-LX frozen extractor
+        → 1D hidden states + 2D attention maps
+    → 双表示构造 + v6-style patch compression（默认 patch_size=4）
+        - single s (B,L/4,Ds)     ← MARS hidden 投影后 1D patchify
+        - pair   z (B,L/4,L/4,Dp) ← MARS attention 72→128→64 后 2D patchify
+        - noisy x_t 同样 patchify 后注入 pair
+    → DualFlowDiT blocks × 8（在 patch space 上运行）
+        - single self-attention (1D) + RoPE + SDPA + AdaLN-Zero(t)
+        - OuterProductMean(single) → pair        （1D→2D 通信）
+        - pair row/col axial attention + RoPE2D + SDPA + AdaLN-Zero(t)
+        - FFN + DropPath
+    → unpatch + refine → full-resolution contact logit
+    → tau-leap sampling + score projection
+```
 
-| | 判别式 | Flow Matching (v12) |
-|---|---|---|
-| 输出 | 单次前向 → probability | 迭代采样 → 结构 |
-| 本质 | 学 P(contact\|seq) | 学噪声→结构的映射 |
-| 多样性 | 无 | 不同噪声 → 不同结构 |
-| 不确定性 | 无 | 多次采样的方差 |
-| 全局一致性 | 无保证 | Flow 天然鼓励全局协调 |
-
-### vs Diffusion (DDPM/DDIM)
-
-| | Diffusion | Flow Matching |
-|---|---|---|
-| 路径 | 固定 noise schedule | **直线**最优传输路径 |
-| 采样步数 | 通常 100-1000 步 | **10-50 步**即可 |
-| 训练目标 | 预测噪声 ε | 预测速度 v 或目标 x₁ |
-| 理论 | Score matching | **ODE flow** |
-
-### 为什么 DiT？
-
-- Transformer 天然处理 2D 结构化数据（row/col attention）
-- AdaLN-Zero 是最高效的 conditioning 方式（零初始化保证训练稳定）
-- 已被 ImageGen (DiT, SD3, Flux) 验证为最强生成骨干
-
----
-
-## 与 v6 的区别
-
-| | v6 | v12 |
-|---|---|---|
-| Flow 类型 | Discrete (CTMC, binary) | **Continuous** (OT interpolation) |
-| 采样 | Tau-leap (随机翻转) | **Euler ODE** (确定性) |
-| 状态空间 | {0, 1}^{L×L} | **ℝ^{L×L}** (连续) |
-| Loss | 9 个组件 | **1 个 MSE** |
-| 骨干 | Dilated Axial + Patch + 三头 | **纯 DiT** |
-| 代码行数 | ~800 行 (3 文件) | **~250 行 (1 文件)** |
-
-关键转变：**从离散流到连续流**。v6 的 per-position 独立翻转导致位置漂移；v12 在连续空间做 ODE 积分，路径更平滑，结果更精确。
+设计要点：
+- **v6 式 patch-space flow backbone**：`patch_size=4` 时，主干 pair attention / OPM 从 `L×L` 降到 `(L/4)×(L/4)`，attention 主体计算量约降 16×，OPM 中间张量约降 16×。
+- **删除 seq_oh**：碱基配对兼容性交给模型从 MARS 表示中自行学习。
+- **删除 pair_1d outer-concat**：single 改走独立 1D 轨道，通过 `OuterProductMean` 注入 pair，替代低效的 expand+concat。
+- **pair_2d 少压缩后再 patchify**：`Conv2d 72→128→64` 后用 learned patch embedding 压到 `hidden_dim`。
+- **显存提示**：`OuterProductMean` 中间张量为 `(B,L/patch,L/patch,opm_hidden²)`，默认 `patch_size=4`、`opm_hidden=16`。
 
 ---
 
-## 超参数
+## 3. 关键修复记录
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| hidden_dim | 256 | DiT token 维度 |
-| num_heads | 8 | 注意力头数 |
-| num_layers | 8 | DiT block 数量 |
-| ff_mult | 4 | FFN 扩展倍数 |
-| dropout | 0.1 | Dropout |
-| sigma_min | 1e-4 | 最小噪声尺度 |
-| prediction_type | 'x1' | 预测目标: 'x1' 或 'velocity' |
-| num_steps (推理) | 50 | Euler 积分步数 |
-| threshold (推理) | 0.5 | 二值化阈值 |
+### 3.1 修复 double zero-init 梯度冻结
+
+原实现同时：
+
+- AdaLN gate zero-init (`g1=0`)
+- `row_out/col_out` zero-init (`h=0`)
+
+导致 `pair + g1*h` 中 `g1` 与 `h` 都为 0，attention 分支可能拿不到梯度。当前已保留 AdaLN-Zero，但取消 `row_out/col_out` 的 zero-init。
+
+### 3.2 修复 x_t 输入初始无效
+
+`xt_proj` 原来 zero-init，使生成式输入 `x_t` 初始完全不起作用。当前改为 `normal_(std=0.02)`。
+
+### 3.3 修复 sample threshold 无效
+
+原 `sample(..., threshold=0.5)` 中 threshold 没被使用，且投影依赖 `x_t * score`。当前改为：
+
+- `threshold` 传入 projection
+- 默认 `score-based projection`，不再强依赖最终随机 `x_t`
+- 可选 `use_sample_mask=True` 才使用 `x_t` 作为候选 mask
+
+### 3.4 统一非法位置 mask
+
+`_dit_forward()` 输出 logit 时会统一 mask：
+
+- `|i-j| < 3`
+- padding 区域
+
+`NonCrossingLoss` 也改为使用合法位置 mask，避免非法短距离位置干扰 loss。
+
+### 3.5 训练工程修复
+
+- 默认开启 `use_gradient_checkpoint=true`
+- `run_v12.sh` 默认 resume，不再删除 checkpoint/history
+- 只有 `FRESH_RUN=1` 才会备份并清理旧结果
+- checkpoint 保存 `global_step`、optimizer、scheduler、history、patience_cnt
+- 训练数据增强按配置开启（默认与 v9/v10 一致：select=0.20, replace=0.40）
 
 ---
 
-## 使用
+## 4. 当前配置摘要
 
-```python
-from symfold.v12.model import RNAFlowDiT
-from utils.lm import get_extractor
-
-extractor, tokenizer = get_extractor(args)
-
-model = RNAFlowDiT(
-    extractor=extractor,
-    freeze_mars=True,
-    hidden_dim=256,
-    num_heads=8,
-    num_layers=8,
-)
-
-# Training
-loss, loss_dict = model(batch)
-
-# Inference (50-step Euler sampling)
-pred_binary, pred_prob = model.sample(batch, num_steps=50, threshold=0.5)
+```json
+{
+  "model": {
+    "freeze_mars": true,
+    "hidden_dim": 256,
+    "num_heads": 8,
+    "num_layers": 8,
+    "dropout": 0.2,
+    "drop_path": 0.15,
+    "use_rope": true,
+    "patch_size": 4,
+    "use_gradient_checkpoint": false,
+    "rho_0": 0.005
+  },
+  "training": {
+    "batch_size": 8,
+    "gradient_accumulation_steps": 1,
+    "max_len_filter": 490,
+    "augmentation": {"enabled": true, "select": 0.20, "replace": 0.40}
+  },
+  "sampling": {
+    "num_steps": 20,
+    "eval_num_steps": 20,
+    "threshold": 0.5
+  }
+}
 ```
 
 ---
 
-## 文件结构
+## 5. 与 v6/v10 的关系
 
-```
-symfold/v12/
-├── README.md    ← 本文档
-├── __init__.py
-└── model.py     ← 完整模型 (~250行)
-```
+| 版本 | 范式 | 核心特点 |
+|------|------|----------|
+| v6 | Discrete Flow | patch_size=4, DA-SE-DiT, 多头 loss |
+| v10 | Discriminative | MARS 解冻，DensityNetProPlus，直接预测 contact |
+| v12 | Discrete Flow + DiT | v6-style patch-space FlowDiT + RoPE2D + SDPA + MARS frozen |
 
----
-
-## 创新点总结
-
-1. **首次将 Continuous Flow Matching 应用于 RNA 二级结构生成式预测**
-2. **DiT (AdaLN-Zero Transformer) 作为 2D contact map 的生成骨干**
-3. **MARS 语言模型提供序列级条件，通过 pair projection 注入**
-4. **连续空间 ODE 积分替代离散 tau-leap，消除位置漂移**
-5. **极简训练目标 (单一 MSE loss)，无需复杂多任务平衡**
+v12 的目标不是直接替代 v10，而是探索生成式 RNA folding 是否能产生不同错误模式，并与判别式模型互补。

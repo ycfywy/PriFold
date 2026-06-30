@@ -106,7 +106,7 @@ export PYTHONPATH=/root/aigame/dannyyan/PriFold
 
 | 版本 | 训练范式 | Best Val F1 | Test F1 | epochs | 关键设计 |
 |------|---------|-------------|---------|--------|---------|
-| **v12** | 生成式离散 Flow Matching（FlowDiT） | 待重训 | 待全量评估 | 100（config） | Bernoulli flow / CTMC tau-leap，v6-style `patch_size=4` 压缩空间，双轨 `single+pair`，MARS frozen |
+| **v12** | 生成式离散 Flow Matching（FlowDiT） | 0.5879 @93 | 0.5934 @99（周期全量 test） | 100 | Bernoulli flow / CTMC tau-leap，v6-style `patch_size=4` 压缩空间，双轨 `single+pair`，MARS frozen；首轮完整训练已完成但未达到 v6/v10/v11 |
 | **v11** | 监督判别式（v10 基础） | 0.7256 @94 | **0.7290** @89 | 100 | 在 v9 基础上放开 MARS 权重 + 对 test bad-case 相似样本 2x 过采样 |
 | **v10** | 监督判别式（Focal BCE + Dice） | 0.7265 @147 | 0.7284 @149 | 151 | MARS 160M **全部解冻**微调，全分辨率 Axial Attention |
 | **v9** | 监督判别式 | 0.6814 @160 | 0.6961 | 183 | MARS **冻结** + RoPE + 强正则（v10 的起点） |
@@ -116,11 +116,13 @@ export PYTHONPATH=/root/aigame/dannyyan/PriFold
 
 - **v10/v11 仍是当前有完整实测的最强模型**，判别式范式，Test F1 ≈ 0.73；v11 凭 hard-case 过采样小幅超越 v10。
 - **v12 是当前生成式新主线**，代码在 `symfold/v12/`：Discrete Bernoulli Flow Matching + `FlowDiT`，不是 continuous OT flow。
+- **v12 首轮完整训练结论**：Best Val F1=0.5879 @93，periodic full Test F1=0.5934 @99；训练 loss 下降但 F1 在 0.58~0.59 平台，主要问题不是配对数量（pred/GT 接近）而是配对位置/身份不够准。
 - **v12 当前实现要点**：`x_t ~ Bernoulli(t·x_1 + (1-t)·rho_0)`，模型预测 `p(x_1=1|x_t,t,RNA)`；主干参考 v6 在 `patch_size=4` 的压缩空间运行，输出再 unpatch 回 full contact map；推理使用 CTMC tau-leap + score-based projection。
+- **v12 失败诊断优先级**：先查 `patch_size=4` 空间瓶颈、MARS frozen（仅 16.2M 可训）、生成式训练/采样不一致、`eval_num_steps=8` 与 threshold/projection 未调优；不要先假定整体架构完全错误。
 - **v12 旧 continuous-flow checkpoint / 旧说明与当前语义不兼容**；从头训练必须显式 `FRESH_RUN=1 bash symfold/train/run_v12.sh`，默认运行应走安全 resume。
 - **v9 → v10 的关键变化**：解冻 MARS（可训参数 5M → 165.7M），从 v9 best.pt warm-start，Test F1 +3.2pp。
 - **v6 是早期生成式（Flow Matching）路线**，效率高（patch 下采样使 attention 显存降 ~64×）但精度落后判别式约 12pp。
-- v12 细节以 `symfold/v12/README.md`、`symfold/v12/TRAINING_LOG.md` 和 `symfold/config/v12/v12_flow_dit.json` 为准；`docs/training_comparison_v6_v10_v12.md` 中关于 v12 continuous OT / Euler 的内容属于历史说明，阅读时需注意过期。
+- v12 细节以 `symfold/v12/README.md`、`symfold/v12/TRAINING_LOG.md`、`docs/v12/v12_failure_analysis.md` 和 `symfold/config/v12/v12_flow_dit.json` 为准；`docs/training_comparison_v6_v10_v12.md` 中关于 v12 continuous OT / Euler 的内容属于历史说明，阅读时需注意过期。
 
 ## 6. 实验结论入口
 
@@ -130,11 +132,12 @@ export PYTHONPATH=/root/aigame/dannyyan/PriFold
 docs/v9/                      # v9 测试报告、消融结论、失败分析
 docs/v10/                     # v10 报告与全面分析
 docs/v11/                     # v11 改进方案与各子实验
+docs/v12/                     # v12 首轮训练结果与失败分析
 symfold/v12/README.md         # v12 当前架构与实现说明
 symfold/v12/TRAINING_LOG.md   # v12 修复记录与待验证事项
 docs/archive/                 # 历史版本 (v6/v7/v8 等) 已归档于此
 ```
 
 > 各版本的指标进展、逐 epoch 数字等以 `docs/` 中的最新报告为准，本文件只保留概况。
-> v12 在未形成正式实验报告前，以 `symfold/v12/` 下的实现说明为准；正式报告仍应写入 `docs/v12/`。
+> v12 架构与实现说明以 `symfold/v12/` 为准，实验结论与失败分析写入 `docs/v12/`。
 > 历史版本的代码 / 输出 / 日志 / 文档分别归档在 `symfold/archive/`、`symfold/outputs/archive/`、`symfold/logs/archive/`、`docs/archive/`。

@@ -29,7 +29,7 @@
 
 ## 1. 目录组织规范（AI 产出文件时必须遵守）
 
-所有产出物按**类型**归位，并在各自目录下**按版本分开**（如 `v10`、`v11`、`v12`）：
+所有产出物按**类型**归位，并在各自目录下**按版本分开**（如 `v12`、`v12_patch2`）：
 
 | 类型 | 位置 | 说明 |
 |------|------|------|
@@ -39,7 +39,7 @@
 
 规则：
 
-1. **写文档一律放到 `docs/` 下**，并放进对应版本子目录（如 `docs/v11/`）；禁止把报告散落在 `outputs/` 或项目根目录。
+1. **写文档一律放到 `docs/` 下**，并放进对应版本子目录（如 `docs/v12/` 或 `docs/v12_patch2/`）；禁止把报告散落在 `outputs/` 或项目根目录。
 2. **`outputs/<version>/` 只放模型产物与可视化**：checkpoint、history、图片。checkpoint 只保留 `best.pt` 和 `last.pt`，不保留中间 `epoch_*.pt`。
 3. **`logs/<version>/` 只放日志**。
 4. 三类目录都必须**按版本命名分开**，不同版本互不混放。
@@ -50,7 +50,7 @@
 
 1. 每个 epoch 保存 `history.json`
 2. 每个 epoch 绘制 `training_curves.png`
-3. 默认每 20 epoch 做一次 `bprna-test` eval，并写入 history；若版本配置显式设定不同频率（如 v12 `test_eval_every=10`），以配置为准并在文档说明
+3. 默认每 20 epoch 做一次 `bprna-test` eval，并写入 history；若版本配置显式设定不同频率，以配置为准并在文档说明
 4. 保存 `best.pt` 和 `last.pt`（不保留中间 epoch checkpoint）
 5. 训练结束后用 best checkpoint 跑完整 test report
 6. **Checkpoint 必须保存完整的续训状态**，确保 resume 后学习率不跳变：
@@ -102,42 +102,40 @@ export PYTHONPATH=/root/aigame/dannyyan/PriFold
 
 ## 5. 主要训练版本概况
 
-实验线位于 `symfold/`。当前主要版本（已完成指标均为 bpRNA-test 全量实测，F1 越高越好；未完成版本标注为待评估）：
+实验线位于 `symfold/`。当前 v12 版本线只保留 `v12` 和 `v12_patch2`（已完成指标均为 bpRNA-test 全量实测，F1 越高越好）：
 
 | 版本 | 训练范式 | Best Val F1 | Test F1 | epochs | 关键设计 |
 |------|---------|-------------|---------|--------|---------|
-| **v12** | 生成式离散 Flow Matching（FlowDiT） | 0.5879 @93 | 0.5934 @99（周期全量 test） | 100 | Bernoulli flow / CTMC tau-leap，v6-style `patch_size=4` 压缩空间，双轨 `single+pair`，MARS frozen；首轮完整训练已完成但未达到 v6/v10/v11 |
-| **v11** | 监督判别式（v10 基础） | 0.7256 @94 | **0.7290** @89 | 100 | 在 v9 基础上放开 MARS 权重 + 对 test bad-case 相似样本 2x 过采样 |
-| **v10** | 监督判别式（Focal BCE + Dice） | 0.7265 @147 | 0.7284 @149 | 151 | MARS 160M **全部解冻**微调，全分辨率 Axial Attention |
-| **v9** | 监督判别式 | 0.6814 @160 | 0.6961 | 183 | MARS **冻结** + RoPE + 强正则（v10 的起点） |
-| **v6** | 离散 Flow Matching（CTMC） | 0.6059 @213 | 0.6083 @189 | 217 | Patch 下采样 4× + Dilated Axial Attention，生成式 |
+| **v12_patch2** | 生成式离散 Flow Matching（FlowDiT） | **0.6047 @86** | **0.6098 @99**（周期全量 test） | 100 | Bernoulli flow / CTMC tau-leap，`patch_size=2`，双轨 `single+pair`，MARS frozen；当前 v12 线最佳完整训练 |
+| **v12** | 生成式离散 Flow Matching（FlowDiT） | 0.5879 @93 | 0.5934 @99（周期全量 test） | 100 | Bernoulli flow / CTMC tau-leap，`patch_size=4` 压缩空间，双轨 `single+pair`，MARS frozen；v12 首轮完整训练基线 |
 
 要点：
 
-- **v10/v11 仍是当前有完整实测的最强模型**，判别式范式，Test F1 ≈ 0.73；v11 凭 hard-case 过采样小幅超越 v10。
-- **v12 是当前生成式新主线**，代码在 `symfold/v12/`：Discrete Bernoulli Flow Matching + `FlowDiT`，不是 continuous OT flow。
-- **v12 首轮完整训练结论**：Best Val F1=0.5879 @93，periodic full Test F1=0.5934 @99；训练 loss 下降但 F1 在 0.58~0.59 平台，主要问题不是配对数量（pred/GT 接近）而是配对位置/身份不够准。
-- **v12 当前实现要点**：`x_t ~ Bernoulli(t·x_1 + (1-t)·rho_0)`，模型预测 `p(x_1=1|x_t,t,RNA)`；主干参考 v6 在 `patch_size=4` 的压缩空间运行，输出再 unpatch 回 full contact map；推理使用 CTMC tau-leap + score-based projection。
-- **v12 失败诊断优先级**：先查 `patch_size=4` 空间瓶颈、MARS frozen（仅 16.2M 可训）、生成式训练/采样不一致、`eval_num_steps=8` 与 threshold/projection 未调优；不要先假定整体架构完全错误。
-- **v12 旧 continuous-flow checkpoint / 旧说明与当前语义不兼容**；从头训练必须显式 `FRESH_RUN=1 bash symfold/train/run_v12.sh`，默认运行应走安全 resume。
-- **v9 → v10 的关键变化**：解冻 MARS（可训参数 5M → 165.7M），从 v9 best.pt warm-start，Test F1 +3.2pp。
-- **v6 是早期生成式（Flow Matching）路线**，效率高（patch 下采样使 attention 显存降 ~64×）但精度落后判别式约 12pp。
-- v12 细节以 `symfold/v12/README.md`、`symfold/v12/TRAINING_LOG.md`、`docs/v12/v12_failure_analysis.md` 和 `symfold/config/v12/v12_flow_dit.json` 为准；`docs/training_comparison_v6_v10_v12.md` 中关于 v12 continuous OT / Euler 的内容属于历史说明，阅读时需注意过期。
+- **v12_patch2 是当前 v12 线主结果**：相比 `v12`，Best Val F1 从 0.5879 提升到 0.6047，periodic full Test F1 从 0.5934 提升到 0.6098。
+- **v12/v12_patch2 均为当前生成式主线**，代码在 `symfold/v12/`：Discrete Bernoulli Flow Matching + `FlowDiT`，不是 continuous OT flow。
+- **当前实现要点**：`x_t ~ Bernoulli(t·x_1 + (1-t)·rho_0)`，模型预测 `p(x_1=1|x_t,t,RNA)`；主干在 patch 空间运行，输出再 unpatch 回 full contact map；推理使用 CTMC tau-leap + score-based projection。
+- **v12_patch2 关键变化**：将 `patch_size` 从 4 改为 2，提升空间分辨率；配置为 `symfold/config/v12/v12_patch2_flow_dit.json`，输出位于 `symfold/outputs/v12_patch2/`，日志位于 `symfold/logs/v12_patch2/`。
+- **诊断优先级**：继续优先排查 patch 空间分辨率、MARS frozen（仅小头可训）、生成式训练/采样不一致、`eval_num_steps` 与 threshold/projection 调优；不要先假定整体架构完全错误。
+- **旧 continuous-flow checkpoint / 旧说明与当前语义不兼容**；从头训练 `v12` 必须显式 `FRESH_RUN=1 bash symfold/train/run_v12.sh`，默认运行应走安全 resume。`v12_patch2` 续训/重跑必须使用其独立输出目录与配置，避免覆盖 `v12`。
+- v12 线细节以 `symfold/v12/README.md`、`symfold/v12/TRAINING_LOG.md`、`docs/v12/v12_failure_analysis.md`、`symfold/config/v12/v12_flow_dit.json` 和 `symfold/config/v12/v12_patch2_flow_dit.json` 为准。
 
 ## 6. 实验结论入口
 
-各版本的详细结论、报告与分析见 `docs/<version>/`，例如：
+当前 v12 版本线入口：
 
 ```text
-docs/v9/                      # v9 测试报告、消融结论、失败分析
-docs/v10/                     # v10 报告与全面分析
-docs/v11/                     # v11 改进方案与各子实验
-docs/v12/                     # v12 首轮训练结果与失败分析
-symfold/v12/README.md         # v12 当前架构与实现说明
-symfold/v12/TRAINING_LOG.md   # v12 修复记录与待验证事项
-docs/archive/                 # 历史版本 (v6/v7/v8 等) 已归档于此
+docs/v12/                                   # v12 训练结果、失败分析与后续 v12 线结论
+symfold/v12/README.md                      # v12 当前架构与实现说明
+symfold/v12/TRAINING_LOG.md                # v12 修复记录与待验证事项
+symfold/config/v12/v12_flow_dit.json       # v12 配置（patch_size=4）
+symfold/config/v12/v12_patch2_flow_dit.json # v12_patch2 配置（patch_size=2）
+symfold/outputs/v12/                       # v12 模型产物、history 与训练曲线
+symfold/outputs/v12_patch2/                # v12_patch2 模型产物、history 与训练曲线
+symfold/logs/v12/                          # v12 训练/评估日志
+symfold/logs/v12_patch2/                   # v12_patch2 训练/评估日志
+docs/archive/                              # 历史版本文档归档
 ```
 
-> 各版本的指标进展、逐 epoch 数字等以 `docs/` 中的最新报告为准，本文件只保留概况。
+> 各版本的指标进展、逐 epoch 数字等以 `docs/`、`history.json` 和日志中的最新实测为准，本文件只保留概况。
 > v12 架构与实现说明以 `symfold/v12/` 为准，实验结论与失败分析写入 `docs/v12/`。
 > 历史版本的代码 / 输出 / 日志 / 文档分别归档在 `symfold/archive/`、`symfold/outputs/archive/`、`symfold/logs/archive/`、`docs/archive/`。

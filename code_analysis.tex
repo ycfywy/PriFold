@@ -1,0 +1,36 @@
+\documentclass[UTF8,a4paper,11pt]{ctexart}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{xcolor}
+\usepackage{listings}
+\lstset{basicstyle=\ttfamily\small,breaklines=true,frame=single,backgroundcolor=\color{gray!8},numbers=left,numberstyle=\tiny}
+
+\title{PriFold 测试代码简析}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+PriFold 的测试数据由 \texttt{inference.py} 第 53--56 行调用
+\texttt{load\_data} 后构造 \texttt{test\_loader}。长度过滤发生在数据集构造之前，核心代码如下：
+
+\begin{lstlisting}[language=Python]
+# utils/tools.py, lines 20--27
+elif args.mode == 'bprna-test':
+    df = pd.read_csv(f'{args.data_dir}/bprna/bpRNA.csv')
+    df = df[df['seq'].str.len() < 490]
+    df_test = df[df['data_name'] == 'TS0'].reset_index(drop=True)
+    test_dataset = SSDataset(df_test, ...)
+\end{lstlisting}
+
+ArchiveII 和 RNAStrAlign 测试也使用相同条件：
+
+\begin{lstlisting}[language=Python]
+# utils/tools.py, lines 29--42
+df = df[df['seq'].str.len() < 490]       # ArchiveII
+df_str = df_str[df_str['seq'].str.len() < 490]  # RNAStrAlign
+\end{lstlisting}
+
+因此，条件 \texttt{len(seq) < 490} 表示：长度 489 的序列仍会保留，长度为 490 以及更长的序列都会被过滤掉。该限制并非只作用于测试集；在 \texttt{bprna} 模式下，\texttt{utils/tools.py} 第 9--18 行会先过滤整个数据表，再划分训练、验证和测试集，因此三者均不包含长度大于等于 490 的序列。模型配置中的 \texttt{max\_len: 490}（\texttt{utils/RNAformer/models/RNAformer\_32M\_config\_bprna.yml} 第 13 行）与这一限制相对应。
+
+\end{document}

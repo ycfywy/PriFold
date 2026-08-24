@@ -1,0 +1,77 @@
+\documentclass[UTF8,a4paper,11pt]{ctexart}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\lstset{basicstyle=\ttfamily\small,breaklines=true,frame=single,backgroundcolor=\color{gray!8},numbers=left,numberstyle=\tiny}
+
+\title{PriFold 测试长度过滤复现对比}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{代码逻辑}
+
+测试入口在 \texttt{inference.py} 第 53--56 行调用 \texttt{load\_data} 并构造测试加载器。原始数据加载代码在 \texttt{utils/tools.py}：
+
+\begin{lstlisting}[language=Python]
+# utils/tools.py, lines 20--27
+elif args.mode == 'bprna-test':
+    df = pd.read_csv(f'{args.data_dir}/bprna/bpRNA.csv')
+    df = df[df['seq'].str.len() < 490]
+    df_test = df[df['data_name'] == 'TS0'].reset_index(drop=True)
+    test_dataset = SSDataset(df_test, ...)
+
+# utils/tools.py, lines 29--42
+df = df[df['seq'].str.len() < 490]       # ArchiveII
+df_str = df_str[df_str['seq'].str.len() < 490]  # RNAStrAlign
+\end{lstlisting}
+
+因此，原始实现的评测条件是 $\operatorname{len}(\texttt{seq})<490$，长度 490 及以上的序列会被排除。本文另外使用完全相同的推理代码，仅将上述临时实验版本中的阈值改为 $\operatorname{len}(\texttt{seq})<512$；项目原始代码未被修改。
+
+\section{复现设置}
+
+两组实验均使用 CUDA 0、\texttt{prifold} Conda 环境、官方模型权重、\texttt{batch\_size=1}、\texttt{scale=0.01} 和 \texttt{num\_workers=8}。模型配置仍为 \texttt{utils/RNAformer/models/RNAformer\_32M\_config\_bprna\_slow.yml}，其中第 13 行设置 \texttt{max\_len: 490}。因此，$<512$ 实验只是扩大了测试样本筛选范围，并不是重新训练或重新配置一个 512 长度模型。
+
+\section{测试集规模与结果}
+
+\begin{table}[h]
+\centering
+\small
+\caption{长度过滤阈值对测试集规模和指标的影响。}
+\begin{tabular}{lrrrrrrr}
+\toprule
+数据集 & 原始数 & $<490$ & $<512$ & 新增 & F1($<490$) & F1($<512$) & $\Delta$F1 \\
+\midrule
+bpRNA TS0 & 1305 & 1303 & 1305 & 2  & 0.770013 & 0.769208 & -0.000805 \\
+RNAStrAlign & 2574 & 2492 & 2513 & 21 & 0.973758 & 0.972667 & -0.001091 \\
+ArchiveII & 3966 & 3845 & 3864 & 19 & 0.904338 & 0.902594 & -0.001744 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+对应的完整结果为：
+
+\begin{itemize}
+  \item bpRNA：$<490$ 为 precision/recall/F1 = 0.793806/0.762325/0.770013；$<512$ 为 0.793419/0.761405/0.769208。
+  \item RNAStrAlign：$<490$ 为 0.974228/0.974376/0.973758；$<512$ 为 0.973142/0.973283/0.972667。
+  \item ArchiveII：$<490$ 为 0.910162/0.903659/0.904338；$<512$ 为 0.908591/0.901900/0.902594。
+\end{itemize}
+
+\section{长度限制的解释}
+
+$<512$ 实验纳入了长度 490--511 的序列，但没有纳入长度 512 及以上的序列。新增样本均使平均 F1 略有下降，说明原始 $<490$ 结果不能直接视为包含这些边界附近序列的结果。
+
+需要特别注意，模型的 \texttt{max\_len} 仍为 490。\texttt{utils/RNAformer/module/embedding.py} 第 41--54 行通过
+\texttt{torch.clip(..., max=self.max\_len-1)} 将相对位置索引限制到 489。因此，本次 $<512$ 复现验证的是“放宽数据过滤后的实际运行结果”，而不是严格意义上经过 512 长度位置编码训练的模型结果。
+
+\section{日志}
+
+\begin{itemize}
+  \item $<490$：\texttt{reproduce\_cuda0\_bprna.log}、\texttt{reproduce\_cuda0\_rnastralign.log}、\texttt{reproduce\_cuda0\_archiveii.log}。
+  \item $<512$：\texttt{reproduce\_cuda0\_bprna\_lt512.log}、\texttt{reproduce\_cuda0\_rnastralign\_lt512.log}、\texttt{reproduce\_cuda0\_archiveii\_lt512.log}。
+\end{itemize}
+
+\end{document}
